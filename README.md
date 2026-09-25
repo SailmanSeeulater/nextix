@@ -29,7 +29,7 @@ docker compose up --build
 
 | Service   | URL / role                                   |
 |-----------|----------------------------------------------|
-| web       | http://localhost:3000 — the board            |
+| web       | http://localhost:3000 — the board (sign in with `NEXTIX_API_TOKEN`) |
 | api       | http://localhost:8000 — FastAPI, `/api/health`, `/docs` |
 | worker    | Celery worker (agent runs)                   |
 | beat      | Celery beat (heartbeat reaper, Phase 3)      |
@@ -46,6 +46,83 @@ Verify:
 curl http://localhost:8000/api/health
 # {"status":"ok","version":"0.1.0","checks":{"db":"ok","redis":"ok"}}
 ```
+
+Open the board and sign in with the value of `NEXTIX_API_TOKEN`. The browser never
+holds that token: the Next.js server keeps it and proxies board requests to the API.
+
+## Creating the GitHub App
+
+nexTix acts on GitHub as a GitHub App (installation tokens, webhooks, a bot identity).
+Personal access tokens are not supported.
+
+1. **Start a webhook relay** so GitHub can reach your laptop. Create a channel at
+   https://smee.io/new, then forward it to the API and leave this running:
+
+   ```bash
+   npx smee-client --url https://smee.io/<your-channel> --target http://localhost:8000/api/github/webhook
+   ```
+
+2. **Create the app** at GitHub, Settings, Developer settings, GitHub Apps, New GitHub App
+   (or under your organization's settings).
+   - **Webhook URL:** your smee.io channel URL. **Webhook secret:** a long random string.
+   - **Repository permissions:**
+
+     | Permission      | Access         | Used for                                   |
+     |-----------------|----------------|--------------------------------------------|
+     | Metadata        | Read           | required by GitHub                         |
+     | Issues          | Read and write | mirror issues, comments, labels            |
+     | Pull requests   | Read and write | link and open PRs                          |
+     | Contents        | Read and write | agent pushes `nextix/*` branches (Phase 3) |
+     | Checks          | Read           | CI status on the review page (Phase 4)     |
+     | Commit statuses | Read           | CI status on the review page (Phase 4)     |
+
+   - **Subscribe to events:** Issues, Issue comment, Pull request, Pull request review,
+     Check run, Check suite. Installation events are always delivered.
+   - **Where can this app be installed:** "Only on this account" is fine for the MVP.
+
+3. **Generate a private key** on the app's page and save it as `secrets/github-app.pem`.
+   Compose mounts `./secrets` read-only at `/run/secrets`. The folder is gitignored.
+
+4. **Fill in `.env`:** `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID` (the `Iv23li...` value,
+   which GitHub recommends as the JWT issuer), `GITHUB_WEBHOOK_SECRET`, and
+   `GITHUB_BOT_LOGIN` (`<app-slug>[bot]`). Then restart with `docker compose up -d`.
+
+5. **Install the app** on a throwaway test repo (app page, Install App). The
+   `installation` webhook adds the repo to nexTix. Create a label named `nextix`
+   in that repo.
+
+6. **Try it.** Label an issue `nextix` and it appears in Todo within seconds. Push a
+   `nextix/issue-<n>` branch and open a PR from it. The card moves to In Review, and
+   to Done when merged.
+
+**Backfill** issues and PRs that existed before the app was installed, or repair any
+drift (GitHub always wins):
+
+```bash
+docker compose exec api python -m nextix.sync owner/repo
+```
+
+**Protect the default branch.** The worker only ever pushes `nextix/*` branches, but
+add a branch protection rule (or ruleset) requiring pull requests on the default
+branch as a second line of defense.
+
+### How the board maps GitHub state
+
+A ticket is any issue labeled `nextix` in an enabled repo. Its column is derived, never
+stored. The first matching rule wins:
+
+| Column      | Rule                                                         |
+|-------------|--------------------------------------------------------------|
+| Done        | linked PR merged, or issue closed                            |
+| Doing       | an agent run is queued, claimed, or running                  |
+| Needs Input | `nextix:needs-input` label, or the last run asked a question |
+| In Review   | open PR from the `nextix/issue-<n>` branch                   |
+| Failed      | last run failed, timed out, or was cancelled                 |
+| Todo        | everything else                                              |
+
+Removing the `nextix` label, deleting, or transferring the issue takes the card off the
+board. Uninstalling the app, or removing a repo from it, disables the repo rather than
+deleting it, so run history is kept.
 
 ## Developing without compose
 
@@ -95,5 +172,12 @@ No real network calls to GitHub or Anthropic happen in CI; those are mocked.
 
 ## Roadmap
 
-Built in phases; see the build spec. Phase 0 (this scaffold) is complete.
-Phase 1 adds the GitHub App, webhooks, and the read-only board.
+Built in phases; see the build spec.
+
+- [x] Phase 0: scaffolding, compose, CI
+- [x] Phase 1: GitHub App, webhooks, backfill, live read-only board
+- [ ] Phase 2: ticket creation (`nextix new`, triage, needs-input)
+- [ ] Phase 3: agent runner end to end
+- [ ] Phase 4: review surface (diff, screenshots, checks)
+- [ ] Phase 5: feedback loop
+- [ ] Phase 6: scale and extras

@@ -44,6 +44,7 @@ services:
     volumes:
       - ./backend:/app
       - artifacts:/data/artifacts
+      - ./secrets:/run/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,6 +63,7 @@ services:
     volumes:
       - ./backend:/app
       - artifacts:/data/artifacts
+      - ./secrets:/run/secrets:ro
     depends_on:
       api:
         condition: service_healthy
@@ -72,6 +74,7 @@ services:
     command: celery -A nextix.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
     volumes:
       - ./backend:/app
+      - ./secrets:/run/secrets:ro
     depends_on:
       api:
         condition: service_healthy
@@ -81,9 +84,10 @@ services:
     # node_modules lives in a named volume so the host tree stays clean; `npm install`
     # on start keeps that volume in sync with package.json (fast no-op when unchanged).
     command: sh -c "npm install --no-audit --no-fund && npm run dev"
+    # The web server holds NEXTIX_API_TOKEN and proxies browser calls to the API,
+    # so the token never reaches the browser.
+    env_file: .env
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
-      # Server-side calls (inside the compose network) use the service name.
       API_INTERNAL_URL: http://api:8000
     ports:
       - "${WEB_PORT:-3000}:3000"

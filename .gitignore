@@ -35,3 +35,7 @@ Thumbs.db
 
 # Celery beat schedule
 celerybeat-schedule*
+
+# Local secrets (GitHub App key)
+secrets/*
+!secrets/README.md
