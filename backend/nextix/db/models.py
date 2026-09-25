@@ -128,6 +128,19 @@ class RunEvent(Base):
     run: Mapped[Run] = relationship(back_populates="events")
 
 
+class WebhookDelivery(Base):
+    """One row per processed GitHub delivery (X-GitHub-Delivery), for dedupe."""
+
+    __tablename__ = "webhook_deliveries"
+
+    delivery_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    event: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class Artifact(Base):
     __tablename__ = "artifacts"
 

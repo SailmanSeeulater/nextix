@@ -1,0 +1,26 @@
+{
+  "action": "created",
+  "installation": {
+    "id": 777,
+    "node_id": "I_1",
+    "account": {
+      "login": "acme",
+      "id": 1001,
+      "type": "Organization"
+    }
+  },
+  "repositories": [
+    {
+      "id": 5001,
+      "node_id": "R_1",
+      "name": "widgets",
+      "full_name": "acme/widgets",
+      "private": true
+    }
+  ],
+  "sender": {
+    "login": "alice",
+    "id": 2001,
+    "type": "User"
+  }
+}

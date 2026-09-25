@@ -20,9 +20,14 @@ class Settings(BaseSettings):
 
     # GitHub App
     github_app_id: str = ""
+    # GitHub recommends the client ID as the JWT issuer; falls back to the app ID.
+    github_app_client_id: str = ""
     github_app_private_key_path: Path | None = None
     github_webhook_secret: str = ""
     github_bot_login: str = "nextix-bot[bot]"
+    github_api_url: str = "https://api.github.com"
+    github_web_url: str = "https://github.com"
+    github_api_version: str = "2026-03-10"
 
     # nexTix
     nextix_api_token: str = "change-me"

@@ -1,0 +1,77 @@
+{
+  "action": "closed",
+  "number": 43,
+  "pull_request": {
+    "id": 8043,
+    "number": 43,
+    "state": "closed",
+    "merged": true,
+    "merged_at": "2026-09-25T12:00:00Z",
+    "title": "[nextix #42] Add a dark mode toggle to settings",
+    "head": {
+      "ref": "nextix/issue-42",
+      "sha": "abc123",
+      "repo": {
+        "id": 5001,
+        "node_id": "R_1",
+        "name": "widgets",
+        "full_name": "acme/widgets",
+        "private": true,
+        "owner": {
+          "login": "acme",
+          "id": 1001,
+          "type": "Organization"
+        },
+        "html_url": "https://github.com/acme/widgets",
+        "default_branch": "main"
+      }
+    },
+    "base": {
+      "ref": "main",
+      "sha": "def456",
+      "repo": {
+        "id": 5001,
+        "node_id": "R_1",
+        "name": "widgets",
+        "full_name": "acme/widgets",
+        "private": true,
+        "owner": {
+          "login": "acme",
+          "id": 1001,
+          "type": "Organization"
+        },
+        "html_url": "https://github.com/acme/widgets",
+        "default_branch": "main"
+      }
+    },
+    "html_url": "https://github.com/acme/widgets/pull/43",
+    "user": {
+      "login": "alice",
+      "id": 2001,
+      "type": "User"
+    }
+  },
+  "repository": {
+    "id": 5001,
+    "node_id": "R_1",
+    "name": "widgets",
+    "full_name": "acme/widgets",
+    "private": true,
+    "owner": {
+      "login": "acme",
+      "id": 1001,
+      "type": "Organization"
+    },
+    "html_url": "https://github.com/acme/widgets",
+    "default_branch": "main"
+  },
+  "installation": {
+    "id": 777,
+    "node_id": "I_1"
+  },
+  "sender": {
+    "login": "alice",
+    "id": 2001,
+    "type": "User"
+  }
+}
