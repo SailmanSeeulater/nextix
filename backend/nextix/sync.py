@@ -1,8 +1,9 @@
 """Backfill one repo from GitHub: ``python -m nextix.sync owner/repo``.
 
-Pulls every issue labeled ``nextix``, re-checks tickets we already track (their
-label may have been removed while we weren't listening), and links PRs from
-``nextix/issue-<n>`` branches. GitHub wins wherever the DB disagrees.
+Matches the installation's repo list to GitHub's, pulls every issue labeled
+``nextix``, re-checks tickets we already track (their label may have been removed
+while we weren't listening), and links PRs from ``nextix/issue-<n>`` branches.
+GitHub wins wherever the DB disagrees.
 """
 
 import argparse
@@ -34,11 +35,12 @@ class SyncReport:
     issues: int = 0
     rechecked: int = 0
     prs_linked: int = 0
+    installation_repos: str = ""
 
     def __str__(self) -> str:
         return (
             f"{self.repo}: {self.issues} labeled issues, {self.rechecked} tracked tickets "
-            f"re-checked, {self.prs_linked} PRs linked"
+            f"re-checked, {self.prs_linked} PRs linked. Installation: {self.installation_repos}"
         )
 
 
@@ -52,6 +54,9 @@ async def sync_repo(
     changed: set[uuid.UUID] = set()
 
     installation = await gh.get_repo_installation(owner, name)
+    accessible = await gh.list_installation_repos(installation.id)
+    reconciled = await service.reconcile_installation_repos(session, installation.id, accessible)
+    report.installation_repos = str(reconciled)
     gh_repo = await gh.get_repo(installation.id, owner, name)
     repo = await service.upsert_repo(
         session,

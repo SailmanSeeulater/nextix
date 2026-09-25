@@ -252,17 +252,39 @@ async def test_stale_closed_pr_does_not_replace_open_pr(
 # ---------------------------------------------------------------- installations
 
 
+def _gh_repo(name: str) -> dict[str, Any]:
+    base = load_fixture("issues_labeled.json")["repository"]
+    return {**base, "id": sum(map(ord, name)), "name": name, "full_name": f"acme/{name}"}
+
+
+def mock_installation_repos(respx_mock: respx.MockRouter, *names: str) -> None:
+    """What GitHub says installation 777 can access right now."""
+    respx_mock.get("/installation/repositories").respond(
+        200,
+        json={"total_count": len(names), "repositories": [_gh_repo(n) for n in names]},
+    )
+
+
+async def repos_by_name(session: AsyncSession) -> dict[str, Repo]:
+    rows = await session.scalars(select(Repo).execution_options(populate_existing=True))
+    return {r.name: r for r in rows}
+
+
 async def test_installation_created_adds_repos(
     client: httpx.AsyncClient, session: AsyncSession, respx_mock: respx.MockRouter
 ) -> None:
-    respx_mock.get("/repos/acme/widgets").respond(
-        200, json=load_fixture("issues_labeled.json")["repository"]
-    )
+    mock_installation_repos(respx_mock, "widgets", "gadgets")
     r = await deliver(client, "installation", load_fixture("installation_created.json"))
     assert r.status_code == 200, r.text
-    repo = await session.scalar(select(Repo))
-    assert repo is not None
-    assert (repo.full_name, repo.installation_id, repo.default_branch, repo.enabled) == (
+    repos = await repos_by_name(session)
+    assert set(repos) == {"widgets", "gadgets"}
+    widgets = repos["widgets"]
+    assert (
+        widgets.full_name,
+        widgets.installation_id,
+        widgets.default_branch,
+        widgets.enabled,
+    ) == (
         "acme/widgets",
         777,
         "main",
@@ -270,10 +292,44 @@ async def test_installation_created_adds_repos(
     )
 
 
+async def test_switch_from_all_to_selected_retires_dropped_repos(
+    client: httpx.AsyncClient, session: AsyncSession, respx_mock: respx.MockRouter
+) -> None:
+    """Regression: GitHub's event for this switch lists only the added repo.
+
+    Installed on "all" (widgets, gadgets, gizmos), then narrowed to just "board".
+    The payload says added=[board], removed=[] -- the three dropped repos only
+    disappear because we reconcile against GitHub's full list.
+    """
+    mock_installation_repos(respx_mock, "widgets", "gadgets", "gizmos")
+    await deliver(client, "installation", load_fixture("installation_created.json"))
+    await deliver(client, "issues", load_fixture("issues_labeled.json"))  # widgets gets a ticket
+
+    mock_installation_repos(respx_mock, "board")
+    payload = load_fixture("installation_repositories_removed.json")
+    payload.update(
+        action="added",
+        repositories_added=[{"id": 1, "name": "board", "full_name": "acme/board", "private": True}],
+        repositories_removed=[],
+    )
+    r = await deliver(client, "installation_repositories", payload)
+    assert r.json()["note"] == "1 repos active, 1 disabled, 2 removed"
+
+    repos = await repos_by_name(session)
+    assert set(repos) == {"board", "widgets"}  # ticket-less gadgets/gizmos deleted
+    assert repos["board"].enabled is True
+    assert repos["widgets"].enabled is False  # has a ticket: kept, disabled
+    assert await ticket(session) is not None
+
+
 async def test_repo_removed_from_installation_is_disabled(
-    client: httpx.AsyncClient, session: AsyncSession, publisher: FakePublisher
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+    publisher: FakePublisher,
+    respx_mock: respx.MockRouter,
 ) -> None:
     await deliver(client, "issues", load_fixture("issues_labeled.json"))
+    mock_installation_repos(respx_mock)  # nothing accessible any more
     await deliver(
         client, "installation_repositories", load_fixture("installation_repositories_removed.json")
     )
@@ -283,12 +339,34 @@ async def test_repo_removed_from_installation_is_disabled(
     assert publisher.events[-1][1] == "ticket.removed"
 
 
-async def test_installation_deleted_disables_all_repos(
-    client: httpx.AsyncClient, session: AsyncSession
+async def test_readding_a_repo_enables_it_again(
+    client: httpx.AsyncClient, session: AsyncSession, respx_mock: respx.MockRouter
 ) -> None:
+    await deliver(client, "issues", load_fixture("issues_labeled.json"))
+    mock_installation_repos(respx_mock)
+    await deliver(
+        client, "installation_repositories", load_fixture("installation_repositories_removed.json")
+    )
+    mock_installation_repos(respx_mock, "widgets")
+    payload = load_fixture("installation_repositories_removed.json")
+    payload.update(
+        action="added",
+        repositories_added=payload["repositories_removed"],
+        repositories_removed=[],
+    )
+    await deliver(client, "installation_repositories", payload)
+    assert (await repos_by_name(session))["widgets"].enabled is True
+
+
+async def test_installation_deleted_retires_all_repos(
+    client: httpx.AsyncClient, session: AsyncSession, respx_mock: respx.MockRouter
+) -> None:
+    mock_installation_repos(respx_mock, "widgets", "gadgets")
+    await deliver(client, "installation", load_fixture("installation_created.json"))
     await deliver(client, "issues", load_fixture("issues_labeled.json"))
     payload = load_fixture("installation_created.json")
     payload["action"] = "deleted"
     await deliver(client, "installation", payload)
-    repo = await session.scalar(select(Repo).execution_options(populate_existing=True))
-    assert repo is not None and repo.enabled is False
+    repos = await repos_by_name(session)
+    assert set(repos) == {"widgets"}  # gadgets had no tickets
+    assert repos["widgets"].enabled is False

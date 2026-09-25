@@ -62,6 +62,9 @@ Personal access tokens are not supported.
    npx smee-client --url https://smee.io/<your-channel> --target http://localhost:8000/api/github/webhook
    ```
 
+   If you set `API_PORT` in `.env`, use that port in `--target` instead of 8000.
+   Always pass `--target`: without it smee posts to port 3000, which is the web app.
+
 2. **Create the app** at GitHub, Settings, Developer settings, GitHub Apps, New GitHub App
    (or under your organization's settings).
    - **Webhook URL:** your smee.io channel URL. **Webhook secret:** a long random string.
@@ -121,8 +124,12 @@ stored. The first matching rule wins:
 | Todo        | everything else                                              |
 
 Removing the `nextix` label, deleting, or transferring the issue takes the card off the
-board. Uninstalling the app, or removing a repo from it, disables the repo rather than
-deleting it, so run history is kept.
+board.
+
+Whenever the installation changes, nexTix asks GitHub for the full list of repos the app
+can reach and matches its own list to it. Repos the app lost are disabled if they have
+tickets, so run history is kept, and removed if they never had one. The sync command
+does the same check, so it also repairs a stale repo list.
 
 ## Developing without compose
 

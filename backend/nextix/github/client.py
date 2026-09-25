@@ -45,8 +45,14 @@ class GitHubClient:
         return resp.json()
 
     async def _paginate(
-        self, installation_id: int, path: str, params: dict[str, Any]
+        self,
+        installation_id: int,
+        path: str,
+        params: dict[str, Any],
+        *,
+        items_key: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        """Follow Link rel="next". ``items_key`` is for endpoints that wrap the list."""
         url: str | None = f"{self._api_url}{path}"
         query: dict[str, Any] | None = {**params, "per_page": 100}
         while url:
@@ -54,7 +60,8 @@ class GitHubClient:
                 url, headers=await self._headers(installation_id), params=query
             )
             resp.raise_for_status()
-            for item in resp.json():
+            body = resp.json()
+            for item in body[items_key] if items_key else body:
                 yield item
             match = _NEXT_LINK.search(resp.headers.get("link", ""))
             url = match.group(1) if match else None
@@ -76,6 +83,15 @@ class GitHubClient:
         return GhRepository.model_validate(
             await self._get(installation_id, f"/repos/{owner}/{name}")
         )
+
+    async def list_installation_repos(self, installation_id: int) -> list[GhRepository]:
+        """Every repo the installation can currently access."""
+        return [
+            GhRepository.model_validate(item)
+            async for item in self._paginate(
+                installation_id, "/installation/repositories", {}, items_key="repositories"
+            )
+        ]
 
     async def get_issue(
         self, installation_id: int, owner: str, name: str, number: int

@@ -113,21 +113,6 @@ async def handle_pull_request(
     return DispatchResult(changed_tickets={ticket_id})
 
 
-async def _add_repos(
-    session: AsyncSession, gh: GitHubClient, installation_id: int, refs: list[GhRepoRef]
-) -> None:
-    # Installation payloads omit default_branch, so fetch each repo.
-    for ref in refs:
-        full = await gh.get_repo(installation_id, ref.owner_login, ref.name)
-        await service.upsert_repo(
-            session,
-            owner=full.owner.login,
-            name=full.name,
-            installation_id=installation_id,
-            default_branch=full.default_branch,
-        )
-
-
 async def _board_tickets_for_installation(
     session: AsyncSession, installation_id: int
 ) -> set[uuid.UUID]:
@@ -137,25 +122,37 @@ async def _board_tickets_for_installation(
     return set(rows)
 
 
+async def _reconcile(
+    session: AsyncSession, gh: GitHubClient, installation_id: int, *, enable: list[str]
+) -> DispatchResult:
+    """Ask GitHub which repos the installation covers now, and match our rows to it."""
+    accessible = await gh.list_installation_repos(installation_id)
+    result = await service.reconcile_installation_repos(
+        session, installation_id, accessible, enable=enable
+    )
+    changed = await _board_tickets_for_installation(session, installation_id)
+    return DispatchResult(changed_tickets=changed, note=str(result))
+
+
 async def handle_installation(
     payload: dict[str, Any], session: AsyncSession, gh: GitHubClient
 ) -> DispatchResult:
     installation = GhInstallation.model_validate(payload["installation"])
     action = payload.get("action")
-    if action == "created":
-        refs = [GhRepoRef.model_validate(r) for r in payload.get("repositories") or []]
-        await _add_repos(session, gh, installation.id, refs)
-        return DispatchResult(note=f"added {len(refs)} repos")
-    if action in ("deleted", "suspend"):
-        # Disable rather than delete: keeps run history; GitHub stops sending events anyway.
+    if action in ("created", "unsuspend", "new_permissions_accepted"):
+        return await _reconcile(session, gh, installation.id, enable=[])
+    if action == "suspend":
+        # Keep rows so unsuspending restores them; GitHub stops sending events meanwhile.
         await service.set_repos_enabled(session, enabled=False, installation_id=installation.id)
         gh.auth.invalidate(installation.id)
         changed = await _board_tickets_for_installation(session, installation.id)
-        return DispatchResult(changed_tickets=changed, note=f"installation {action}")
-    if action == "unsuspend":
-        await service.set_repos_enabled(session, enabled=True, installation_id=installation.id)
+        return DispatchResult(changed_tickets=changed, note="installation suspended")
+    if action == "deleted":
+        # The app can no longer call GitHub for this installation, so retire everything.
         changed = await _board_tickets_for_installation(session, installation.id)
-        return DispatchResult(changed_tickets=changed, note="installation unsuspended")
+        result = await service.retire_repos(session, installation.id)
+        gh.auth.invalidate(installation.id)
+        return DispatchResult(changed_tickets=changed, note=f"installation deleted: {result}")
     return DispatchResult(note=f"ignored installation.{action}")
 
 
@@ -164,27 +161,12 @@ async def handle_installation_repositories(
 ) -> DispatchResult:
     installation = GhInstallation.model_validate(payload["installation"])
     added = [GhRepoRef.model_validate(r) for r in payload.get("repositories_added") or []]
-    removed = [GhRepoRef.model_validate(r) for r in payload.get("repositories_removed") or []]
-    await _add_repos(session, gh, installation.id, added)
-    # Re-enable repos that come back after an earlier removal.
-    if added:
-        await service.set_repos_enabled(
-            session,
-            enabled=True,
-            installation_id=installation.id,
-            full_names=[r.full_name for r in added],
-        )
-    if removed:
-        await service.set_repos_enabled(
-            session,
-            enabled=False,
-            installation_id=installation.id,
-            full_names=[r.full_name for r in removed],
-        )
-    changed = await _board_tickets_for_installation(session, installation.id)
-    return DispatchResult(
-        changed_tickets=changed, note=f"added {len(added)}, removed {len(removed)}"
-    )
+    # The payload is not a complete diff (an "all" -> "selected" switch omits the dropped
+    # repos), so reconcile against GitHub's full list instead of applying it directly.
+    changed_before = await _board_tickets_for_installation(session, installation.id)
+    result = await _reconcile(session, gh, installation.id, enable=[r.full_name for r in added])
+    result.changed_tickets |= changed_before
+    return result
 
 
 HANDLERS: dict[str, Handler] = {

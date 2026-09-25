@@ -14,6 +14,7 @@ from nextix.config import get_settings
 from nextix.db.session import get_async_engine
 from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.client import GitHubClient
+from nextix.log_config import configure_logging
 
 GITHUB_HTTP_TIMEOUT_S = 20.0
 
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     settings = get_settings()
     app = FastAPI(title="nexTix API", version=__version__, lifespan=lifespan)
     app.add_middleware(

@@ -38,6 +38,10 @@ def _pr(
 
 def _mock_github(respx_mock: respx.MockRouter) -> None:
     respx_mock.get("/repos/acme/widgets/installation").respond(200, json={"id": 777})
+    widgets = load_fixture("issues_labeled.json")["repository"]
+    respx_mock.get("/installation/repositories").respond(
+        200, json={"total_count": 1, "repositories": [widgets]}
+    )
     respx_mock.get("/repos/acme/widgets").respond(
         200, json=load_fixture("issues_labeled.json")["repository"]
     )
@@ -73,6 +77,7 @@ async def test_backfills_issues_and_prs(
     await session.commit()
 
     assert (report.issues, report.prs_linked) == (3, 2)
+    assert report.installation_repos == "1 repos active, 0 disabled, 0 removed"
     repo = await session.scalar(select(Repo))
     assert repo is not None and repo.installation_id == 777
     tickets = {t.issue_number: t for t in await session.scalars(select(Ticket))}
@@ -108,3 +113,19 @@ async def test_resync_corrects_drift(
     }
     assert tickets[2].labels == ["bug"]
     assert tickets[1].issue_state == "deleted"
+
+
+async def test_sync_retires_repos_the_installation_lost(
+    session: AsyncSession, gh: GitHubClient, respx_mock: respx.MockRouter
+) -> None:
+    """Rows left over from an earlier, wider installation are cleaned up."""
+    session.add(Repo(owner="acme", name="old-thing", installation_id=777, default_branch="main"))
+    await session.commit()
+    _mock_github(respx_mock)
+
+    report, _ = await sync_repo(session, gh, "acme/widgets")
+    await session.commit()
+
+    assert report.installation_repos == "1 repos active, 0 disabled, 1 removed"
+    names = [r.name for r in await session.scalars(select(Repo))]
+    assert names == ["widgets"]

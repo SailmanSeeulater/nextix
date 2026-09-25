@@ -6,18 +6,18 @@ GitHub is the source of truth. Everything here either copies GitHub state into
 
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import Subquery, func, select, update
+from sqlalchemy import Subquery, exists, func, select, update
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from nextix.config import get_settings
 from nextix.db.models import Repo, Run, Ticket
-from nextix.github.schemas import GhIssue, GhPullRequest
+from nextix.github.schemas import GhIssue, GhPullRequest, GhRepository
 from nextix.runs.state import ACTIVE_STATUSES, FAILED_STATUSES, RunStatus
 from nextix.tickets.schemas import Column, RunSummary, TicketCard
 
@@ -122,6 +122,72 @@ async def set_repos_enabled(
     if full_names:
         stmt = stmt.where((Repo.owner + "/" + Repo.name).in_(list(full_names)))
     await session.execute(stmt.values(enabled=enabled))
+
+
+@dataclass
+class RepoReconcileResult:
+    active: int = 0
+    disabled: int = 0
+    deleted: int = 0
+
+    def __str__(self) -> str:
+        return f"{self.active} repos active, {self.disabled} disabled, {self.deleted} removed"
+
+
+async def retire_repos(
+    session: AsyncSession, installation_id: int, *, keep: Collection[str] = ()
+) -> RepoReconcileResult:
+    """Retire an installation's repos except ``keep`` (full names, case-insensitive).
+
+    Repos with tickets are disabled so their history survives. Repos that never had
+    a ticket are deleted outright, since nothing about them is worth keeping.
+    """
+    keep_lower = {name.lower() for name in keep}
+    result = RepoReconcileResult()
+    repos = await session.scalars(select(Repo).where(Repo.installation_id == installation_id))
+    for repo in repos:
+        if repo.full_name.lower() in keep_lower:
+            continue
+        has_tickets = await session.scalar(select(exists().where(Ticket.repo_id == repo.id)))
+        if has_tickets:
+            repo.enabled = False
+            result.disabled += 1
+        else:
+            await session.delete(repo)
+            result.deleted += 1
+    await session.flush()
+    return result
+
+
+async def reconcile_installation_repos(
+    session: AsyncSession,
+    installation_id: int,
+    accessible: Sequence[GhRepository],
+    *,
+    enable: Collection[str] = (),
+) -> RepoReconcileResult:
+    """Make our repos for an installation match the repos GitHub says it can access.
+
+    ``accessible`` must be the installation's full current repo list from GitHub.
+    Webhook payloads are not enough: switching an installation from "all
+    repositories" to "selected" lists only the added repos, never the dropped ones.
+    ``enable`` names repos to switch back on (ones the user just added).
+    """
+    for gh_repo in accessible:
+        await upsert_repo(
+            session,
+            owner=gh_repo.owner.login,
+            name=gh_repo.name,
+            installation_id=installation_id,
+            default_branch=gh_repo.default_branch,
+        )
+    if enable:
+        await set_repos_enabled(
+            session, enabled=True, installation_id=installation_id, full_names=list(enable)
+        )
+    result = await retire_repos(session, installation_id, keep=[r.full_name for r in accessible])
+    result.active = len(accessible)
+    return result
 
 
 # --------------------------------------------------------------------------- tickets

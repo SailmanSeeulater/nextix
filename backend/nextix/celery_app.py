@@ -7,6 +7,9 @@ crashed worker returns its run to the queue instead of losing it.
 from celery import Celery
 
 from nextix.config import get_settings
+from nextix.log_config import configure_logging
+
+configure_logging()
 
 settings = get_settings()
 
