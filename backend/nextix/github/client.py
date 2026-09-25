@@ -44,6 +44,13 @@ class GitHubClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def _post(self, installation_id: int, path: str, body: dict[str, Any]) -> Any:
+        resp = await self._http.post(
+            f"{self._api_url}{path}", headers=await self._headers(installation_id), json=body
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def _paginate(
         self,
         installation_id: int,
@@ -125,3 +132,72 @@ class GitHubClient:
             installation_id, f"/repos/{owner}/{name}/pulls", {"state": state}
         ):
             yield GhPullRequest.model_validate(item)
+
+    # ------------------------------------------------------------------ writes / triage
+
+    async def list_labels(self, installation_id: int, owner: str, name: str) -> list[str]:
+        return [
+            item["name"]
+            async for item in self._paginate(installation_id, f"/repos/{owner}/{name}/labels", {})
+        ]
+
+    async def create_label(
+        self,
+        installation_id: int,
+        owner: str,
+        name: str,
+        *,
+        label: str,
+        color: str,
+        description: str = "",
+    ) -> None:
+        try:
+            await self._post(
+                installation_id,
+                f"/repos/{owner}/{name}/labels",
+                {"name": label, "color": color, "description": description},
+            )
+        except httpx.HTTPStatusError as exc:
+            # 422 "already_exists": someone created it concurrently. That's fine.
+            if exc.response.status_code != 422:
+                raise
+
+    async def create_issue(
+        self,
+        installation_id: int,
+        owner: str,
+        name: str,
+        *,
+        title: str,
+        body: str,
+        labels: list[str],
+    ) -> GhIssue:
+        data = await self._post(
+            installation_id,
+            f"/repos/{owner}/{name}/issues",
+            {"title": title, "body": body, "labels": labels},
+        )
+        return GhIssue.model_validate(data)
+
+    async def create_comment(
+        self, installation_id: int, owner: str, name: str, number: int, body: str
+    ) -> None:
+        await self._post(
+            installation_id, f"/repos/{owner}/{name}/issues/{number}/comments", {"body": body}
+        )
+
+    async def list_file_paths(
+        self, installation_id: int, owner: str, name: str, ref: str
+    ) -> list[str]:
+        """File paths on ``ref``. Empty for an empty repo. May be truncated by GitHub."""
+        try:
+            data = await self._get(
+                installation_id,
+                f"/repos/{owner}/{name}/git/trees/{ref}",
+                params={"recursive": "1"},
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (404, 409):  # no such ref / empty repository
+                return []
+            raise
+        return sorted(e["path"] for e in data.get("tree", []) if e.get("type") == "blob")

@@ -15,6 +15,7 @@ from nextix.db.session import get_async_engine
 from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.client import GitHubClient
 from nextix.log_config import configure_logging
+from nextix.tickets.triage import ClaudeTriager
 
 GITHUB_HTTP_TIMEOUT_S = 20.0
 
@@ -27,6 +28,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         GitHubAppAuth.from_settings(settings, http), http, settings.github_api_url
     )
     app.state.redis = aioredis.Redis.from_url(settings.redis_url)
+    app.state.triager = (
+        ClaudeTriager.from_settings(settings) if settings.anthropic_api_key else None
+    )
     try:
         yield
     finally:

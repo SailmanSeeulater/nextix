@@ -311,6 +311,7 @@ def _card(ticket: Ticket, repo: Repo, run: Run | None) -> TicketCard:
             if run
             else None
         ),
+        created_via=ticket.created_via,
         updated_at=ticket.updated_at,
     )
 

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-5"
+    anthropic_model: str = "claude-opus-5"
 
     # GitHub App
     github_app_id: str = ""
