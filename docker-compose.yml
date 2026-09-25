@@ -1,0 +1,101 @@
+name: nextix
+
+x-backend-env: &backend-env
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://nextix:nextix@postgres:5432/nextix
+    REDIS_URL: redis://redis:6379/0
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nextix
+      POSTGRES_PASSWORD: nextix
+      POSTGRES_DB: nextix
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nextix -d nextix"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    <<: *backend-env
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn nextix.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+      - artifacts:/data/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  worker:
+    build: ./backend
+    <<: *backend-env
+    command: celery -A nextix.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+      - artifacts:/data/artifacts
+    depends_on:
+      api:
+        condition: service_healthy
+
+  beat:
+    build: ./backend
+    <<: *backend-env
+    command: celery -A nextix.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
+    volumes:
+      - ./backend:/app
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build: ./web
+    # node_modules lives in a named volume so the host tree stays clean; `npm install`
+    # on start keeps that volume in sync with package.json (fast no-op when unchanged).
+    command: sh -c "npm install --no-audit --no-fund && npm run dev"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
+      # Server-side calls (inside the compose network) use the service name.
+      API_INTERNAL_URL: http://api:8000
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+      - web_next:/app/.next
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  artifacts:
+  web_node_modules:
+  web_next:
