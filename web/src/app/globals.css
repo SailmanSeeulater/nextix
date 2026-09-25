@@ -1,19 +1,1075 @@
 @import "tailwindcss";
 
+/*
+ * nexTix: every ticket is a Wallet pass, every state a stack of passes.
+ *
+ * Colors come from the theme (src/lib/themes.ts, shared with KeyUp): a theme sets 16
+ * base tokens (--bg, --raised, --ink, --accent, --red, ...) on <html data-theme>, and
+ * everything below derives from them. Never hardcode a color in component CSS; derive
+ * a token here instead.
+ */
+
 :root {
-  --background: #fafafa;
-  --foreground: #171717;
+  /* Surfaces */
+  --ground: var(--bg);
+  --surface: var(--raised);
+  --surface-2: var(--field);
+  --hairline: color-mix(in srgb, var(--ink) 14%, var(--bg));
+  --overlay: color-mix(in srgb, var(--ink) 5%, transparent);
+
+  /* Actions and state */
+  --accent-fill: var(--accent);
+  /* Accent as text: nudged toward the ink so it holds 4.5:1 on the ground in every theme. */
+  --accent-text: color-mix(in srgb, var(--accent) 85%, var(--ink));
+  --accent-ink: var(--on-accent);
+  --accent-fill-hover: color-mix(in srgb, var(--accent) 86%, var(--ink));
+  --ring: color-mix(in srgb, var(--accent) 70%, transparent);
+  --danger: var(--red);
+  --ok: var(--green);
+  --switch-on: var(--ink);
+  --switch-knob-on: var(--bg);
+  /* Ink on the pastel hues of dark themes is the ground; on the deep hues of light themes, white. */
+  --on-hue: var(--bg);
+
+  /* Pass colors: flat, one per state, all derived from the theme. */
+  --pass-todo: var(--raised);
+  --pass-todo-ink: var(--ink);
+  --pass-todo-mark: var(--ink-3);
+  /* A raised pass warmed by the accent: live work, marked by the accent without the full fill,
+     which read as Failed in themes whose accent sits near red. */
+  --pass-doing: color-mix(in srgb, var(--accent) 35%, var(--raised));
+  --pass-doing-ink: var(--ink);
+  --pass-doing-mark: var(--accent);
+  /* "Your move": the inverted pass, bone on dark themes and ink-black on light, never near red. */
+  --pass-needs_input: var(--ink);
+  --pass-needs_input-ink: var(--bg);
+  --pass-needs_input-mark: var(--ink);
+  --pass-failed: var(--red);
+  --pass-failed-ink: var(--on-hue);
+  --pass-failed-mark: var(--red);
+  --pass-in_review: var(--rose);
+  --pass-in_review-ink: var(--on-hue);
+  --pass-in_review-mark: var(--rose);
+  --pass-done: var(--green);
+  --pass-done-ink: var(--on-hue);
+  --pass-done-mark: var(--green);
+
+  /* KeyUp's stacked-card shadow: the upward shadow lets each top edge read over the pass beneath. */
+  --shadow-pass:
+    0 1px 0 var(--overlay) inset, 0 -6px 18px -8px var(--shadow), 0 8px 18px -12px var(--shadow);
+  --shadow-surface: 0 1px 0 var(--overlay) inset, 0 0 0 1px var(--line);
+
+  --radius-pass: 14px;
+  /* Apple platforms render SF, Wallet's own face; everywhere else gets self-hosted Geist,
+     the closest open grotesque in character. SF itself can't be licensed for the web. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-geist), sans-serif;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root[data-mode="light"] {
+  --on-hue: #ffffff;
+}
+
+html {
+  background: var(--ground);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 0;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--ink);
+}
+
+input,
+textarea {
+  caret-color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 28%, transparent) transparent;
+}
+
+a {
+  text-underline-offset: 3px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ top bar */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 0 18px;
+}
+
+.wordmark {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.topbar-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.select {
+  appearance: none;
+  background: var(--surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 10px center;
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 7px 30px 7px 11px;
+  font: inherit;
+  font-size: 13px;
+  max-width: 220px;
+  text-overflow: ellipsis;
+}
+
+.select:hover {
+  border-color: color-mix(in srgb, var(--ink) 30%, transparent);
+}
+
+.link-button {
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  padding: 4px 2px;
+  font: inherit;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.link-button:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ live dot */
+
+.live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.live-dot[data-state="live"]::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid currentColor;
+  opacity: 0;
+  animation: live-ring 1.8s var(--ease-out) infinite;
+}
+
+@keyframes live-ring {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ composer */
+
+.composer {
+  background: var(--surface);
+  border-radius: 18px;
+  box-shadow: var(--shadow-surface);
+  margin-bottom: 28px;
+}
+
+.composer-prompt {
+  display: block;
+  width: 100%;
+  resize: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1.4;
+  padding: 18px 20px 14px;
+  min-height: 62px;
+  max-height: 240px;
+}
+
+.composer-prompt::placeholder {
+  color: var(--ink-3);
+}
+
+.composer-prompt:focus-visible {
+  outline: none;
+}
+
+.composer:focus-within {
+  box-shadow:
+    var(--shadow-surface),
+    0 0 0 2px color-mix(in srgb, var(--ring) 70%, transparent);
+}
+
+.composer-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 16px 14px 20px;
+}
+
+.composer-labels {
+  flex: 0 1 190px;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 7px 11px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.composer-labels::placeholder {
+  color: var(--ink-3);
+}
+
+.composer-note {
+  padding: 0 20px 16px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.composer-note[data-tone="error"] {
+  color: var(--danger);
+}
+
+.composer-note a {
+  color: inherit;
+  font-weight: 600;
+}
+
+/* The boarding-pass tear line: a dashed rule with a notch cut into each edge. */
+.notch-cut {
+  position: relative;
+  height: 1px;
+}
+
+.notch-cut::before,
+.notch-cut::after {
+  content: "";
+  position: absolute;
+  top: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--ground);
+}
+
+.notch-cut::before {
+  left: -8px;
+}
+
+.notch-cut::after {
+  right: -8px;
+}
+
+.notch-cut > span {
+  position: absolute;
+  inset: 0 14px;
+  background-image: linear-gradient(to right, currentColor 55%, transparent 0);
+  background-size: 8px 1px;
+  opacity: 0.35;
+}
+
+/* ------------------------------------------------------------------ switch */
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.switch input {
+  appearance: none;
+  position: relative;
+  width: 42px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: background-color 200ms var(--ease-out);
+  cursor: pointer;
+  flex: none;
+}
+
+.switch input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--ink-2);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 60%, transparent);
+  transition:
+    transform 220ms var(--ease-out),
+    background-color 220ms var(--ease-out);
+}
+
+.switch input:checked {
+  background: var(--switch-on);
+}
+
+.switch input:checked::after {
+  transform: translateX(16px);
+  background: var(--switch-knob-on);
+}
+
+.switch input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ buttons */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 18px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+  cursor: pointer;
+  transition:
+    background-color 160ms var(--ease-out),
+    transform 160ms var(--ease-out);
+  white-space: nowrap;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* KeyUp's neutral-disabled rule: a disabled primary is a quiet raised button, never dimmed accent. */
+.button:disabled {
+  background: var(--surface-2);
+  color: var(--ink-3);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  cursor: not-allowed;
+}
+
+.button[aria-busy="true"] {
+  opacity: 0.85;
+  cursor: progress;
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------------------------------------------ stacks */
+
+.stacks {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1439px) {
+  .stacks {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 1279px) {
+  .stacks {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 32px;
+  }
+}
+
+.stack-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 2px 12px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.stack-head svg {
+  flex: none;
+  color: var(--stack-hue);
+}
+
+.stack-count {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.stack-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Passes overlap like a Wallet stack: each lower pass sits in front. */
+.stack-list > li + li {
+  margin-top: -14px;
+}
+
+.stack-empty {
+  border: 1.5px dashed var(--hairline);
+  border-radius: var(--radius-pass);
+  padding: 16px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.stack-more {
+  margin-top: 12px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: 10px;
+}
+
+.stack-more:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Mobile: one stack at a time under a segmented switcher. */
+.segments {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .topbar-tools {
+    gap: 10px;
+  }
+
+  .topbar-tools .select {
+    max-width: 150px;
+  }
+
+  /* On phones the live dot speaks for itself; the word stays for screen readers. */
+  .signal-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .composer-labels {
+    flex: 1 1 120px;
+  }
+
+  .segments {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    margin-bottom: 16px;
+    border-radius: 12px;
+    background: var(--surface-2);
+  }
+
+  .segment {
+    position: relative;
+    flex: 0 0 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 0;
+    border-radius: 9px;
+    padding: 7px 8px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 650;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    transition: background-color 180ms var(--ease-out);
+  }
+
+  .segment svg {
+    flex: none;
+    color: var(--seg-mark);
+  }
+
+  .segment[aria-pressed="true"] {
+    flex: 1 1 auto;
+    background: var(--seg-hue);
+    color: var(--seg-ink);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 50%, transparent);
+  }
+
+  .segment[aria-pressed="true"] svg {
+    color: currentColor;
+  }
+
+  .segment-word {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Inactive segments show glyph and count; the word stays for screen readers. */
+  .segment:not([aria-pressed="true"]) .segment-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .stacks {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stacks > section:not([data-active="true"]) {
+    display: none;
+  }
+
+  .stacks .stack-head {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------ pass */
+
+.pass {
+  /* Wallet's label-over-value: labels differ by caps and tracking, and a touch of tone. */
+  --pass-label: color-mix(in srgb, var(--pass-ink) 94%, var(--pass-bg));
+  position: relative;
+  border-radius: var(--radius-pass);
+  background: var(--pass-bg);
+  color: var(--pass-ink);
+  box-shadow: var(--shadow-pass);
+}
+
+.pass-toggle {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 11px 14px 13px;
+  border-radius: var(--radius-pass);
+  cursor: pointer;
+}
+
+/* The next pass overlaps 14px; a collapsed pass pads its foot so no title line sits under it. */
+.pass[data-open="false"] .pass-toggle {
+  padding-bottom: 24px;
+}
+
+.stack-list > li:last-child .pass[data-open="false"] .pass-toggle {
+  padding-bottom: 13px;
+}
+
+.pass-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.pass-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pass-label);
+}
+
+.pass-strip svg {
+  flex: none;
+}
+
+.pass-repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pass-header-field {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  white-space: nowrap;
+  color: var(--pass-ink);
+}
+
+.pass-title {
+  margin-top: 5px;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pass[data-open="true"] .pass-title {
+  font-size: 17px;
+  -webkit-line-clamp: 4;
+  text-wrap: balance;
+}
+
+.pass-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 7px;
+  margin-top: 8px;
+  min-height: 26px;
+}
+
+.pass-readout-main {
+  white-space: nowrap;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.pass-readout-sub {
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pass-label);
+}
+
+.pass-readout[data-state="stalled"] {
+  color: var(--danger);
+}
+
+.pass-readout[data-state="stalled"] .pass-readout-main {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+
+.pass-readout[data-state="stalled"] .pass-readout-sub {
+  color: var(--ink-2);
+}
+
+.pass-readout[data-state="live"] .live-dot {
+  color: var(--accent);
+}
+
+/* A stalled Doing pass goes hollow: the accent outline of a Doing pass with no fill. */
+.pass[data-stale="true"] {
+  border: 2px dashed var(--accent);
+  box-shadow: none;
+}
+
+.pass-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 240ms var(--ease-out);
+}
+
+.pass[data-open="true"] .pass-body {
+  grid-template-rows: 1fr;
+}
+
+.pass-body > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.pass-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 10px 12px;
+  padding: 12px 14px 4px;
+  margin: 0;
+}
+
+.pass-field dt {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pass-label);
+}
+
+.pass-field dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.pass-field[data-tone="alert"] dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pass-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 10px 14px 16px;
+}
+
+.pass-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--pass-ink);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--pass-ink) 45%, transparent);
+  text-underline-offset: 3px;
+}
+
+.pass-links a:hover {
+  text-decoration-color: currentColor;
+}
+
+.pass-links a:focus-visible {
+  outline-color: var(--pass-ink);
+  border-radius: 4px;
+}
+
+
+/* ------------------------------------------------------------------ motion */
+
+::view-transition-group(*) {
+  animation-duration: 380ms;
+  animation-timing-function: var(--ease-out);
+}
+
+@keyframes pass-arrive {
+  from {
+    transform: translateY(-10px) scale(0.98);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 60%, transparent);
+  }
+}
+
+.pass[data-fresh="true"] {
+  animation: pass-arrive 520ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ------------------------------------------------------------------ sign in */
+
+.signin {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.signin .pass {
+  width: min(380px, 100%);
+  --pass-bg: var(--pass-todo);
+  --pass-ink: var(--pass-todo-ink);
+}
+
+.signin-field {
+  display: block;
+  padding: 14px 18px 4px;
+}
+
+.signin-field span {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pass-label);
+}
+
+.signin-field input {
+  margin-top: 6px;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 15px;
+  background: var(--field);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.signin-field input:focus-visible {
+  outline: 2px solid var(--pass-ink);
+  outline-offset: 1px;
+}
+
+.signin-error {
+  margin: 10px 18px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--red);
+}
+
+.signin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 20px;
+  font-size: 12px;
+  color: var(--pass-label);
+}
+
+/* ------------------------------------------------------------------ theme picker */
+
+.theme-wrap {
+  position: relative;
+}
+
+.theme-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 150ms var(--ease-out);
+}
+
+.theme-button svg {
+  color: var(--ink-3);
+}
+
+.theme-button:hover {
+  border-color: color-mix(in srgb, var(--ink) 30%, var(--bg));
+}
+
+.theme-button-name {
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-popover {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(640px, calc(100dvh - 96px));
+  overflow-y: auto;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--pane);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 40px -18px var(--shadow), 0 2px 6px color-mix(in srgb, var(--shadow) 35%, transparent);
+  color: var(--ink);
+}
+
+.theme-popover-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.theme-popover-current,
+.theme-popover-note {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.theme-popover-note {
+  margin-top: 14px;
+}
+
+.theme-group-label {
+  margin: 12px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 10px;
+}
+
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.theme-preview {
+  position: relative;
+  display: block;
+  height: 58px;
+  border-radius: 10px;
+  border: 1px solid;
+  overflow: hidden;
+  transition: transform 160ms var(--ease-out);
+}
+
+.theme-swatch:hover .theme-preview {
+  transform: translateY(-1px);
+}
+
+.theme-swatch[aria-pressed="true"] .theme-preview {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Three tiny passes overlapping like a stack. */
+.theme-mini {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 22px;
+  border-radius: 5px;
+  box-shadow: 0 -2px 6px -3px color-mix(in srgb, var(--shadow) 80%, transparent);
+}
+
+.theme-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.theme-swatch[aria-pressed="true"] .theme-name {
+  color: var(--ink);
+}
+
+@media (max-width: 767px) {
+  .theme-button-name {
+    display: none;
+  }
+
+  .theme-popover {
+    position: fixed;
+    top: 64px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
 }

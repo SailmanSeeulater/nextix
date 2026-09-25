@@ -3,7 +3,7 @@
  * server components call these helpers, and the browser goes through the
  * /api/[...path] route handler, which adds the token.
  */
-import type { TicketCard } from "./types";
+import type { RepoOption, TicketCard } from "./types";
 
 export type HealthStatus = "ok" | "error";
 
@@ -43,6 +43,19 @@ export async function fetchTickets(fetchImpl: typeof fetch = fetch): Promise<Tic
     });
     if (!res.ok) return null;
     return (await res.json()) as TicketCard[];
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchRepos(fetchImpl: typeof fetch = fetch): Promise<RepoOption[] | null> {
+  try {
+    const res = await fetchImpl(`${apiBaseUrl()}/api/repos`, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as RepoOption[];
   } catch {
     return null;
   }

@@ -23,9 +23,24 @@ export interface TicketCard {
   pr_url: string | null;
   column: Column;
   latest_run: RunSummary | null;
+  created_via?: string | null;
   updated_at: string;
 }
 
 export type BoardEvent =
   | { type: "ticket.updated"; data: TicketCard }
   | { type: "ticket.removed"; data: { id: string } };
+
+export interface RepoOption {
+  id: string;
+  full_name: string;
+  default_branch: string;
+}
+
+export interface CreateTicketResult {
+  ticket: TicketCard;
+  issue_url: string;
+  board_url: string;
+  needs_input: boolean;
+  clarifying_question: string | null;
+}

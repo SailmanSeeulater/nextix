@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   applyEvent,
+  changesLayout,
   formatElapsed,
   groupByColumn,
   indexCards,
+  formatAgo,
+  headerField,
   isHeartbeatStale,
+  isStalled,
+  liveness,
+  passFields,
+  repoLabels,
   repoOptions,
-  statusLabel,
 } from "./board";
 import type { RunSummary, TicketCard } from "./types";
 
@@ -104,17 +110,125 @@ describe("liveness helpers", () => {
   });
 });
 
-describe("statusLabel", () => {
-  it("describes each column", () => {
-    expect(statusLabel(card())).toBe("ready");
-    expect(statusLabel(card({ column: "doing", latest_run: run() }))).toBe("running");
-    expect(statusLabel(card({ column: "in_review", pr_number: 7 }))).toBe("PR #7 open");
-    expect(statusLabel(card({ column: "done", pr_number: 7, pr_state: "merged" }))).toBe(
-      "PR #7 merged",
+describe("passFields", () => {
+  const now = Date.parse("2026-09-25T10:05:00Z");
+  const labels = (c: TicketCard) => passFields(c, now).map((f) => `${f.label}: ${f.value}`);
+
+  it("shows liveness, elapsed and cost for Doing", () => {
+    const fresh = run({ last_heartbeat: "2026-09-25T10:04:50Z" });
+    expect(labels(card({ column: "doing", latest_run: fresh }))).toEqual([
+      "Agent: agent-ab12",
+      "Heartbeat: Live",
+      "Spent: $0.12",
+    ]);
+  });
+
+  it("flags a lost heartbeat as an alert", () => {
+    const lost = run({ last_heartbeat: "2026-09-25T10:03:00Z" });
+    const hb = passFields(card({ column: "doing", latest_run: lost }), now).find(
+      (f) => f.label === "Heartbeat",
     );
-    expect(statusLabel(card({ column: "done" }))).toBe("closed");
-    expect(
-      statusLabel(card({ column: "failed", latest_run: run({ status: "timed_out" }) })),
-    ).toBe("timed out");
+    expect(hb).toEqual({ label: "Heartbeat", value: "Lost 2m 00s ago", tone: "alert" });
+  });
+
+  it("shows a queued run as waiting for a worker, without a heartbeat", () => {
+    const queued = run({ status: "queued", agent_id: null, started_at: null, last_heartbeat: null });
+    expect(labels(card({ column: "doing", latest_run: queued }))).toEqual([
+      "Agent: Waiting for a worker",
+      "Spent: $0.12",
+    ]);
+  });
+
+  it("describes the other states with facts the API carries", () => {
+    expect(labels(card({ labels: ["nextix", "ui"], created_via: "web" }))).toEqual([
+      "Filed: 5m",
+      "Via: Board",
+      "Labels: ui",
+    ]);
+    expect(labels(card({ column: "failed", latest_run: run({ status: "timed_out", attempt: 2 }) }))).toEqual([
+      "Run: Timed out",
+      "Attempt: 2",
+      "Spent: $0.12",
+    ]);
+    expect(labels(card({ column: "done", pr_number: 7, pr_state: "merged" }))[0]).toBe("Outcome: Merged #7");
+    expect(labels(card({ column: "done" }))[0]).toBe("Outcome: Closed");
+    expect(labels(card({ column: "in_review", pr_number: 7 }))[0]).toBe("Pull request: #7");
+  });
+
+  it("keeps the issue number in the header of every pass", () => {
+    expect(headerField(card({ column: "doing", latest_run: run() }))).toBe("#1");
+    expect(headerField(card())).toBe("#1");
+  });
+
+  it("reads liveness for Doing passes only", () => {
+    const live = run({ last_heartbeat: "2026-09-25T10:04:50Z" });
+    expect(liveness(card({ column: "doing", latest_run: live }), now)).toEqual({
+      state: "live",
+      elapsed: "5m 00s",
+    });
+    const quiet = run({ last_heartbeat: "2026-09-25T10:04:15Z" });
+    expect(liveness(card({ column: "doing", latest_run: quiet }), now)).toEqual({
+      state: "stalled",
+      quietFor: "45s",
+    });
+    expect(liveness(card({ column: "doing", latest_run: run({ status: "queued" }) }), now)).toEqual({
+      state: "queued",
+    });
+    expect(liveness(card(), now)).toBeNull();
+  });
+
+  it("puts stalled passes at the front of the Doing stack", () => {
+    const live = card({
+      id: "live",
+      column: "doing",
+      updated_at: "2026-09-25T10:04:00Z",
+      latest_run: run({ last_heartbeat: "2026-09-25T10:04:55Z" }),
+    });
+    const stalled = card({
+      id: "stalled",
+      column: "doing",
+      updated_at: "2026-09-25T09:00:00Z",
+      latest_run: run({ last_heartbeat: "2026-09-25T10:00:00Z" }),
+    });
+    expect(isStalled(stalled, now)).toBe(true);
+    expect(groupByColumn(indexCards([live, stalled]), null, now).doing.map((c) => c.id)).toEqual([
+      "stalled",
+      "live",
+    ]);
+    expect(groupByColumn(indexCards([live, stalled])).doing.map((c) => c.id)).toEqual([
+      "live",
+      "stalled",
+    ]);
+  });
+
+  it("formats coarse ages", () => {
+    expect(formatAgo("2026-09-25T10:04:30Z", now)).toBe("just now");
+    expect(formatAgo("2026-09-25T08:05:00Z", now)).toBe("2h");
+    expect(formatAgo("2026-09-22T10:05:00Z", now)).toBe("3d");
+  });
+});
+
+describe("changesLayout", () => {
+  const index = indexCards([card()]);
+
+  it("is false for in-place updates such as heartbeats", () => {
+    expect(changesLayout(index, [{ type: "ticket.updated", data: card({ title: "renamed" }) }])).toBe(false);
+  });
+
+  it("is true when a pass is added, removed, or changes stack", () => {
+    expect(changesLayout(index, [{ type: "ticket.updated", data: card({ id: "t2" }) }])).toBe(true);
+    expect(changesLayout(index, [{ type: "ticket.removed", data: { id: "t1" } }])).toBe(true);
+    expect(changesLayout(index, [{ type: "ticket.updated", data: card({ column: "doing" }) }])).toBe(true);
+    expect(changesLayout(index, [{ type: "ticket.removed", data: { id: "nope" } }])).toBe(false);
+  });
+});
+
+describe("repoLabels", () => {
+  it("uses the short name unless two owners share it", () => {
+    expect(repoLabels(["acme/web", "acme/api", "other/web", "acme/api"])).toEqual({
+      "acme/web": "acme/web",
+      "other/web": "other/web",
+      "acme/api": "api",
+    });
   });
 });
