@@ -19,8 +19,6 @@
 
   /* Actions and state */
   --accent-fill: var(--accent);
-  /* Accent as text: nudged toward the ink so it holds 4.5:1 on the ground in every theme. */
-  --accent-text: color-mix(in srgb, var(--accent) 85%, var(--ink));
   --accent-ink: var(--on-accent);
   --accent-fill-hover: color-mix(in srgb, var(--accent) 86%, var(--ink));
   --ring: color-mix(in srgb, var(--accent) 70%, transparent);
@@ -138,9 +136,16 @@ a {
 
 .select {
   appearance: none;
-  background: var(--surface)
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
-    no-repeat right 10px center;
+  /* Chevron drawn from theme ink with two gradients, so it follows every theme. */
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink-3) 50%),
+    linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 10px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
   color: var(--ink);
   border: 1px solid var(--hairline);
   border-radius: 10px;
@@ -509,7 +514,8 @@ a {
 }
 
 .stack-more:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink);
 }
 
 /* Mobile: one stack at a time under a segmented switcher. */
@@ -1072,4 +1078,19 @@ a {
     right: 16px;
     width: auto;
   }
+}
+
+.board-error {
+  padding: 0 2px 20px;
+}
+
+.signin-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.signin-head {
+  padding: 16px 18px 18px;
 }

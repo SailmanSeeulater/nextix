@@ -1,4 +1,3 @@
-import { KeyRound } from "lucide-react";
 import { login } from "./actions";
 
 export default async function LoginPage({
@@ -10,14 +9,8 @@ export default async function LoginPage({
   return (
     <main className="signin">
       <form action={login} className="pass" data-open="true">
-        <div className="pass-toggle" style={{ cursor: "default", paddingBottom: 16 }}>
-          <span className="pass-strip">
-            <KeyRound size={13} strokeWidth={2.5} aria-hidden />
-            <span className="pass-repo">Sign in</span>
-          </span>
-          <h1 className="pass-title" style={{ fontSize: 26, marginTop: 8 }}>
-            nexTix
-          </h1>
+        <div className="signin-head">
+          <h1 className="signin-title">nexTix</h1>
         </div>
         <div className="notch-cut" aria-hidden>
           <span />

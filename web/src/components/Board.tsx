@@ -192,7 +192,7 @@ export function Board({
       />
 
       {loadError ? (
-        <p className="composer-note" data-tone="error" style={{ padding: "0 2px 20px" }}>
+        <p className="composer-note board-error" data-tone="error">
           Couldn&apos;t load tickets from the API. The board fills in as soon as it reconnects.
         </p>
       ) : null}

@@ -1,0 +1,663 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-25T23:46:14.004Z",
+  "title": "Design System: nexTix",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Mustard Accent",
+        "canonical": "oklch(75.8% 0.143 86.5)",
+        "tonalRamp": [
+          "oklch(15% 0.076 86.5)",
+          "oklch(26% 0.092 86.5)",
+          "oklch(37% 0.108 86.5)",
+          "oklch(48% 0.123 86.5)",
+          "oklch(59% 0.139 86.5)",
+          "oklch(70% 0.143 86.5)",
+          "oklch(82% 0.143 86.5)",
+          "oklch(95% 0.136 86.5)"
+        ]
+      },
+      "accent-hover": {
+        "role": "primary",
+        "displayName": "Mustard Accent, Hover",
+        "canonical": "oklch(78.4% 0.134 88.1)",
+        "tonalRamp": [
+          "oklch(15% 0.069 88.1)",
+          "oklch(26% 0.084 88.1)",
+          "oklch(37% 0.098 88.1)",
+          "oklch(48% 0.113 88.1)",
+          "oklch(59% 0.128 88.1)",
+          "oklch(70% 0.134 88.1)",
+          "oklch(82% 0.134 88.1)",
+          "oklch(95% 0.132 88.1)"
+        ],
+        "derivation": "color-mix(in srgb, var(--accent) 86%, var(--ink))"
+      },
+      "on-accent": {
+        "role": "primary",
+        "displayName": "On-Accent Soot",
+        "canonical": "oklch(22.2% 0.008 95.4)",
+        "tonalRamp": [
+          "oklch(15% 0.008 95.4)",
+          "oklch(26% 0.008 95.4)",
+          "oklch(37% 0.008 95.4)",
+          "oklch(48% 0.008 95.4)",
+          "oklch(59% 0.008 95.4)",
+          "oklch(70% 0.008 95.4)",
+          "oklch(82% 0.008 95.4)",
+          "oklch(95% 0.008 95.4)"
+        ]
+      },
+      "red": {
+        "role": "tertiary",
+        "displayName": "Signal Red",
+        "canonical": "oklch(72.7% 0.132 27.0)",
+        "tonalRamp": [
+          "oklch(15% 0.076 27.0)",
+          "oklch(26% 0.090 27.0)",
+          "oklch(37% 0.105 27.0)",
+          "oklch(48% 0.119 27.0)",
+          "oklch(59% 0.132 27.0)",
+          "oklch(70% 0.132 27.0)",
+          "oklch(82% 0.132 27.0)",
+          "oklch(95% 0.122 27.0)"
+        ]
+      },
+      "rose": {
+        "role": "tertiary",
+        "displayName": "Review Rose",
+        "canonical": "oklch(77.8% 0.107 315.2)",
+        "tonalRamp": [
+          "oklch(15% 0.060 315.2)",
+          "oklch(26% 0.072 315.2)",
+          "oklch(37% 0.083 315.2)",
+          "oklch(48% 0.095 315.2)",
+          "oklch(59% 0.107 315.2)",
+          "oklch(70% 0.107 315.2)",
+          "oklch(82% 0.107 315.2)",
+          "oklch(95% 0.107 315.2)"
+        ]
+      },
+      "green": {
+        "role": "tertiary",
+        "displayName": "Merge Green",
+        "canonical": "oklch(78.5% 0.091 146.0)",
+        "tonalRamp": [
+          "oklch(15% 0.053 146.0)",
+          "oklch(26% 0.063 146.0)",
+          "oklch(37% 0.073 146.0)",
+          "oklch(48% 0.083 146.0)",
+          "oklch(59% 0.091 146.0)",
+          "oklch(70% 0.091 146.0)",
+          "oklch(82% 0.091 146.0)",
+          "oklch(95% 0.091 146.0)"
+        ]
+      },
+      "pass-doing": {
+        "role": "tertiary",
+        "displayName": "Warmed Raised",
+        "canonical": "oklch(45.9% 0.067 90.4)",
+        "tonalRamp": [
+          "oklch(15% 0.067 90.4)",
+          "oklch(26% 0.067 90.4)",
+          "oklch(37% 0.067 90.4)",
+          "oklch(48% 0.067 90.4)",
+          "oklch(59% 0.067 90.4)",
+          "oklch(70% 0.067 90.4)",
+          "oklch(82% 0.063 90.4)",
+          "oklch(95% 0.054 90.4)"
+        ],
+        "derivation": "color-mix(in srgb, var(--accent) 35%, var(--raised))"
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Charcoal Ground",
+        "canonical": "oklch(22.6% 0.004 106.7)",
+        "tonalRamp": [
+          "oklch(15% 0.004 106.7)",
+          "oklch(26% 0.004 106.7)",
+          "oklch(37% 0.004 106.7)",
+          "oklch(48% 0.004 106.7)",
+          "oklch(59% 0.004 106.7)",
+          "oklch(70% 0.004 106.7)",
+          "oklch(82% 0.004 106.7)",
+          "oklch(95% 0.004 106.7)"
+        ]
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised Charcoal",
+        "canonical": "oklch(28.0% 0.005 106.7)",
+        "tonalRamp": [
+          "oklch(15% 0.005 106.7)",
+          "oklch(26% 0.005 106.7)",
+          "oklch(37% 0.005 106.7)",
+          "oklch(48% 0.005 106.7)",
+          "oklch(59% 0.005 106.7)",
+          "oklch(70% 0.005 106.7)",
+          "oklch(82% 0.005 106.7)",
+          "oklch(95% 0.005 106.7)"
+        ]
+      },
+      "pane": {
+        "role": "neutral",
+        "displayName": "Pane",
+        "canonical": "oklch(24.3% 0.004 106.7)",
+        "tonalRamp": [
+          "oklch(15% 0.004 106.7)",
+          "oklch(26% 0.004 106.7)",
+          "oklch(37% 0.004 106.7)",
+          "oklch(48% 0.004 106.7)",
+          "oklch(59% 0.004 106.7)",
+          "oklch(70% 0.004 106.7)",
+          "oklch(82% 0.004 106.7)",
+          "oklch(95% 0.004 106.7)"
+        ]
+      },
+      "field": {
+        "role": "neutral",
+        "displayName": "Field",
+        "canonical": "oklch(21.7% 0.004 106.7)",
+        "tonalRamp": [
+          "oklch(15% 0.004 106.7)",
+          "oklch(26% 0.004 106.7)",
+          "oklch(37% 0.004 106.7)",
+          "oklch(48% 0.004 106.7)",
+          "oklch(59% 0.004 106.7)",
+          "oklch(70% 0.004 106.7)",
+          "oklch(82% 0.004 106.7)",
+          "oklch(95% 0.004 106.7)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "canonical": "oklch(30.0% 0.005 106.7)",
+        "tonalRamp": [
+          "oklch(15% 0.005 106.7)",
+          "oklch(26% 0.005 106.7)",
+          "oklch(37% 0.005 106.7)",
+          "oklch(48% 0.005 106.7)",
+          "oklch(59% 0.005 106.7)",
+          "oklch(70% 0.005 106.7)",
+          "oklch(82% 0.005 106.7)",
+          "oklch(95% 0.005 106.7)"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(34.7% 0.005 106.7)",
+        "tonalRamp": [
+          "oklch(15% 0.005 106.7)",
+          "oklch(26% 0.005 106.7)",
+          "oklch(37% 0.005 106.7)",
+          "oklch(48% 0.005 106.7)",
+          "oklch(59% 0.005 106.7)",
+          "oklch(70% 0.005 106.7)",
+          "oklch(82% 0.005 106.7)",
+          "oklch(95% 0.005 106.7)"
+        ],
+        "derivation": "color-mix(in srgb, var(--ink) 14%, var(--bg))"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Bone Ink",
+        "canonical": "oklch(95.5% 0.012 91.5)",
+        "tonalRamp": [
+          "oklch(15% 0.012 91.5)",
+          "oklch(26% 0.012 91.5)",
+          "oklch(37% 0.012 91.5)",
+          "oklch(48% 0.012 91.5)",
+          "oklch(59% 0.012 91.5)",
+          "oklch(70% 0.012 91.5)",
+          "oklch(82% 0.012 91.5)",
+          "oklch(95% 0.012 91.5)"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "oklch(82.4% 0.016 90.3)",
+        "tonalRamp": [
+          "oklch(15% 0.016 90.3)",
+          "oklch(26% 0.016 90.3)",
+          "oklch(37% 0.016 90.3)",
+          "oklch(48% 0.016 90.3)",
+          "oklch(59% 0.016 90.3)",
+          "oklch(70% 0.016 90.3)",
+          "oklch(82% 0.016 90.3)",
+          "oklch(95% 0.016 90.3)"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3",
+        "canonical": "oklch(69.6% 0.015 88.7)",
+        "tonalRamp": [
+          "oklch(15% 0.015 88.7)",
+          "oklch(26% 0.015 88.7)",
+          "oklch(37% 0.015 88.7)",
+          "oklch(48% 0.015 88.7)",
+          "oklch(59% 0.015 88.7)",
+          "oklch(70% 0.015 88.7)",
+          "oklch(82% 0.015 88.7)",
+          "oklch(95% 0.015 88.7)"
+        ]
+      }
+    },
+    "themes": {
+      "source": "web/src/lib/themes.ts (shared with KeyUp, same 15 themes, same values)",
+      "baseTokens": [
+        "bg",
+        "sidebar",
+        "pane",
+        "raised",
+        "field",
+        "line",
+        "ink",
+        "ink-2",
+        "ink-3",
+        "ink-4",
+        "accent",
+        "on-accent",
+        "red",
+        "rose",
+        "green",
+        "shadow"
+      ],
+      "defaults": {
+        "dark": "charcoal",
+        "light": "linen",
+        "root": "charcoal"
+      },
+      "frontmatterResolvedFrom": "charcoal",
+      "list": [
+        {
+          "id": "charcoal",
+          "name": "Charcoal & Mustard",
+          "mode": "dark"
+        },
+        {
+          "id": "graphite",
+          "name": "Graphite & Amber",
+          "mode": "dark"
+        },
+        {
+          "id": "espresso",
+          "name": "Espresso & Cream",
+          "mode": "dark"
+        },
+        {
+          "id": "midnight",
+          "name": "Midnight & Coral",
+          "mode": "dark"
+        },
+        {
+          "id": "forest",
+          "name": "Forest & Brass",
+          "mode": "dark"
+        },
+        {
+          "id": "ink",
+          "name": "Ink & Cyan",
+          "mode": "dark"
+        },
+        {
+          "id": "plum",
+          "name": "Plum & Peach",
+          "mode": "dark"
+        },
+        {
+          "id": "slate",
+          "name": "Slate & Mint",
+          "mode": "dark"
+        },
+        {
+          "id": "oxblood",
+          "name": "Oxblood & Gold",
+          "mode": "dark"
+        },
+        {
+          "id": "obsidian",
+          "name": "Obsidian & Violet",
+          "mode": "dark"
+        },
+        {
+          "id": "carbon",
+          "name": "Carbon & Ember",
+          "mode": "dark"
+        },
+        {
+          "id": "linen",
+          "name": "Linen & Mustard",
+          "mode": "light"
+        },
+        {
+          "id": "snow",
+          "name": "Snow & Cobalt",
+          "mode": "light"
+        },
+        {
+          "id": "sand",
+          "name": "Sand & Olive",
+          "mode": "light"
+        },
+        {
+          "id": "mist",
+          "name": "Mist & Teal",
+          "mode": "light"
+        }
+      ],
+      "derivations": {
+        "--hairline": "color-mix(in srgb, var(--ink) 14%, var(--bg))",
+        "--overlay": "color-mix(in srgb, var(--ink) 5%, transparent)",
+        "--accent-fill-hover": "color-mix(in srgb, var(--accent) 86%, var(--ink))",
+        "--ring": "color-mix(in srgb, var(--accent) 70%, transparent)",
+        "::selection": "color-mix(in srgb, var(--accent) 32%, transparent)",
+        "--on-hue": "var(--bg) on dark themes, #ffffff on light themes",
+        "--pass-todo": "fill var(--raised), ink var(--ink)",
+        "--pass-doing": "fill color-mix(in srgb, var(--accent) 35%, var(--raised)), ink var(--ink)",
+        "--pass-needs_input": "fill var(--ink), ink var(--bg)",
+        "--pass-failed": "fill var(--red), ink var(--on-hue)",
+        "--pass-in_review": "fill var(--rose), ink var(--on-hue)",
+        "--pass-done": "fill var(--green), ink var(--on-hue)",
+        "--pass-label": "color-mix(in srgb, var(--pass-ink) 94%, var(--pass-bg))",
+        "stalled pass": "fill var(--raised), ink var(--ink), 2px dashed var(--accent), no shadow"
+      },
+      "gates": "web/src/lib/themes.test.ts: 4.5:1 for text on every pass fill and ground surface, 3:1 for the stalled outline and live dots; OKLab dE >= 0.2 for Doing and Needs Input vs Failed, >= 0.1 for every state pair"
+    },
+    "typographyMeta": {
+      "readout": {
+        "displayName": "Readout",
+        "purpose": "Doing pass primary field: elapsed time, tabular."
+      },
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "nexTix in the top bar."
+      },
+      "prompt": {
+        "displayName": "Prompt",
+        "purpose": "The composer's one-sentence input."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Collapsed pass titles (two-line clamp) and stack heads."
+      },
+      "title-open": {
+        "displayName": "Title, Open",
+        "purpose": "Open pass title (four-line clamp, balanced)."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Page default."
+      },
+      "value": {
+        "displayName": "Value",
+        "purpose": "Pass field values, tabular."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Controls, notes, counts, pass links."
+      },
+      "strip": {
+        "displayName": "Strip",
+        "purpose": "Pass header strip: uppercase repo name."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase pass field labels at a 94% ink mix."
+      }
+    },
+    "shadows": [
+      {
+        "name": "pass",
+        "value": "0 1px 0 var(--overlay) inset, 0 -6px 18px -8px var(--shadow), 0 8px 18px -12px var(--shadow)",
+        "purpose": "KeyUp's stacked-card shadow on every pass; the upward shadow lifts each top edge over the pass beneath."
+      },
+      {
+        "name": "surface",
+        "value": "0 1px 0 var(--overlay) inset, 0 0 0 1px var(--line)",
+        "purpose": "The composer's ring; on focus-within it adds 0 0 0 2px of the focus color."
+      },
+      {
+        "name": "popover",
+        "value": "0 18px 40px -18px var(--shadow), 0 2px 6px color-mix(in srgb, var(--shadow) 35%, transparent)",
+        "purpose": "The theme picker, the only floating surface."
+      },
+      {
+        "name": "knob",
+        "value": "0 1px 2px color-mix(in srgb, var(--shadow) 60%, transparent)",
+        "purpose": "Switch knob; the active mobile segment uses 50%."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Every transition and animation."
+      },
+      {
+        "name": "press",
+        "value": "160ms",
+        "purpose": "Button fill change, 0.97 press scale, swatch lift."
+      },
+      {
+        "name": "switch",
+        "value": "200ms track, 220ms knob",
+        "purpose": "Switch toggle."
+      },
+      {
+        "name": "pass-open",
+        "value": "240ms, grid-template-rows 0fr to 1fr",
+        "purpose": "Pass body expand and collapse."
+      },
+      {
+        "name": "view-transition",
+        "value": "380ms",
+        "purpose": "Passes travelling between stacks; a created pass morphing out of the composer."
+      },
+      {
+        "name": "pass-arrive",
+        "value": "520ms from translateY(-10px) scale(0.98) with a 3px focus-color ring",
+        "purpose": "A fresh pass landing."
+      },
+      {
+        "name": "live-ring",
+        "value": "1.8s infinite, scale 0.5 to 1.4, opacity 0.8 to 0",
+        "purpose": "Live dot pulse."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation: none; transition: none",
+        "purpose": "prefers-reduced-motion stops everything, view transitions included."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "mobile",
+        "value": "767px (max-width)",
+        "purpose": "One stack under segments; theme popover fixed full width."
+      },
+      {
+        "name": "sm",
+        "value": "640px",
+        "purpose": "Container side padding 16px to 24px."
+      },
+      {
+        "name": "three-up",
+        "value": "1279px (max-width)",
+        "purpose": "Three stack columns, 32px row gap."
+      },
+      {
+        "name": "tight",
+        "value": "1439px (max-width)",
+        "purpose": "Stack gap 12px."
+      },
+      {
+        "name": "container",
+        "value": "1600px",
+        "purpose": "Max board width."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action per view (Create ticket, Sign in): an accent pill.",
+      "html": "<button class=\"ds-btn-primary\">Create ticket</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 999px; padding: 9px 18px; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; font-size: 14px; font-weight: 600; background: #d8a92b; color: #1c1b17; cursor: pointer; transition: background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), transform 160ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-btn-primary:hover { background: #dcb345; } .ds-btn-primary:active { transform: scale(0.97); } .ds-btn-primary:focus-visible { outline: 2px solid rgba(216,169,43,0.7); outline-offset: 2px; }"
+    },
+    {
+      "name": "Primary Button, Disabled",
+      "kind": "button",
+      "refersTo": "button-primary-disabled",
+      "description": "KeyUp's neutral-disabled rule: a quiet field-colored pill, never a dimmed accent.",
+      "html": "<button class=\"ds-btn-disabled\" disabled>Create ticket</button>",
+      "css": ".ds-btn-disabled { border: 0; border-radius: 999px; padding: 9px 18px; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; font-size: 14px; font-weight: 600; background: #1a1a18; color: #a19d93; box-shadow: inset 0 0 0 1px #3a3a37; cursor: not-allowed; }"
+    },
+    {
+      "name": "Todo Pass",
+      "kind": "card",
+      "refersTo": "pass-todo",
+      "description": "A collapsed pass: header strip with state glyph, repo and issue number, then a two-line title.",
+      "html": "<article class=\"ds-pass-todo\"><div class=\"ds-strip\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10.1 2.182a10 10 0 0 1 3.8 0\"/><path d=\"M13.9 21.818a10 10 0 0 1-3.8 0\"/><path d=\"M17.609 3.721a10 10 0 0 1 2.69 2.7\"/><path d=\"M2.182 13.9a10 10 0 0 1 0-3.8\"/><path d=\"M20.279 17.609a10 10 0 0 1-2.7 2.69\"/><path d=\"M21.818 10.1a10 10 0 0 1 0 3.8\"/><path d=\"M3.721 6.391a10 10 0 0 1 2.7-2.69\"/><path d=\"M6.391 20.279a10 10 0 0 1-2.69-2.7\"/></svg><span>storefront</span><span class=\"ds-num\">#142</span></div><div class=\"ds-title\">Add a dark mode toggle to the account settings page</div></article>",
+      "css": ".ds-pass-todo { width: 240px; border-radius: 14px; background: #292926; color: #f3f0e7; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; box-shadow: 0 1px 0 rgba(243,240,231,0.05) inset, 0 -6px 18px -8px rgba(0,0,0,0.72), 0 8px 18px -12px rgba(0,0,0,0.72); padding: 11px 14px 13px; } .ds-pass-todo .ds-strip { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: #e6e3da; } .ds-pass-todo .ds-num { margin-left: auto; font-size: 12px; letter-spacing: 0; font-variant-numeric: tabular-nums; text-transform: none; color: #f3f0e7; } .ds-pass-todo .ds-title { margin-top: 5px; font-size: 15px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; } .ds-pass-todo:hover { cursor: pointer; }"
+    },
+    {
+      "name": "Doing Pass, Live",
+      "kind": "card",
+      "refersTo": "pass-doing",
+      "description": "Raised warmed 35% by the accent; a tabular elapsed readout with a pulsing accent live dot.",
+      "html": "<article class=\"ds-pass-doing\"><div class=\"ds-strip\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2\"/></svg><span>storefront</span><span class=\"ds-num\">#140</span></div><div class=\"ds-title\">Fix the cart badge count</div><div class=\"ds-readout\"><span class=\"ds-dot\"></span><span class=\"ds-main\">6m 19s</span><span class=\"ds-sub\">running</span></div></article>",
+      "css": ".ds-pass-doing { width: 240px; border-radius: 14px; background: #665628; color: #f3f0e7; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; box-shadow: 0 1px 0 rgba(243,240,231,0.05) inset, 0 -6px 18px -8px rgba(0,0,0,0.72), 0 8px 18px -12px rgba(0,0,0,0.72); padding: 11px 14px 13px; } .ds-pass-doing .ds-strip { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: #e8e3d6; } .ds-pass-doing .ds-num { margin-left: auto; font-size: 12px; letter-spacing: 0; font-variant-numeric: tabular-nums; text-transform: none; color: #f3f0e7; } .ds-pass-doing .ds-title { margin-top: 5px; font-size: 15px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; } .ds-readout { display: flex; align-items: center; gap: 7px; margin-top: 8px; } .ds-dot { position: relative; width: 8px; height: 8px; border-radius: 999px; background: #d8a92b; } .ds-dot::after { content: \"\"; position: absolute; inset: -4px; border-radius: 999px; border: 2px solid #d8a92b; opacity: 0; animation: ds-ring 1.8s cubic-bezier(0.22, 1, 0.36, 1) infinite; } @keyframes ds-ring { 0% { transform: scale(0.5); opacity: 0.8; } 100% { transform: scale(1.4); opacity: 0; } } .ds-main { font-size: 21px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; } .ds-sub { font-size: 12px; font-weight: 600; color: #e8e3d6; }"
+    },
+    {
+      "name": "Needs Input Pass",
+      "kind": "card",
+      "refersTo": "pass-needs-input",
+      "description": "The inverted pass: bone on dark themes, ink-black on light; the loudest pass, clear of red.",
+      "html": "<article class=\"ds-pass-needs\"><div class=\"ds-strip\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M7.9 20A9 9 0 1 0 4 16.1L2 22Z\"/><path d=\"M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3\"/><path d=\"M12 17h.01\"/></svg><span>storefront</span><span class=\"ds-num\">#141</span></div><div class=\"ds-title\">Make the checkout faster</div></article>",
+      "css": ".ds-pass-needs { width: 240px; border-radius: 14px; background: #f3f0e7; color: #1c1c1a; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; box-shadow: 0 1px 0 rgba(243,240,231,0.05) inset, 0 -6px 18px -8px rgba(0,0,0,0.72), 0 8px 18px -12px rgba(0,0,0,0.72); padding: 11px 14px 13px; } .ds-pass-needs .ds-strip { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: #2a2a27; } .ds-pass-needs .ds-num { margin-left: auto; font-size: 12px; letter-spacing: 0; font-variant-numeric: tabular-nums; text-transform: none; color: #1c1c1a; } .ds-pass-needs .ds-title { margin-top: 5px; font-size: 15px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; }"
+    },
+    {
+      "name": "Stalled Doing Pass",
+      "kind": "card",
+      "refersTo": "pass-doing",
+      "description": "A Doing pass whose heartbeat went quiet: hollow, dashed accent outline, red No heartbeat readout.",
+      "html": "<article class=\"ds-pass-stalled\"><div class=\"ds-strip\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2\"/></svg><span>billing-api</span><span class=\"ds-num\">#136</span></div><div class=\"ds-title\">Add idempotency keys to POST /charges</div><div class=\"ds-stall\"><span class=\"ds-main\">No heartbeat</span><span class=\"ds-sub\">quiet for 1m 33s</span></div></article>",
+      "css": ".ds-pass-stalled { width: 240px; border-radius: 14px; background: #292926; color: #f3f0e7; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; box-shadow: 0 1px 0 rgba(243,240,231,0.05) inset, 0 -6px 18px -8px rgba(0,0,0,0.72), 0 8px 18px -12px rgba(0,0,0,0.72); padding: 11px 14px 13px; } .ds-pass-stalled .ds-strip { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: #e6e3da; } .ds-pass-stalled .ds-num { margin-left: auto; font-size: 12px; letter-spacing: 0; font-variant-numeric: tabular-nums; text-transform: none; color: #f3f0e7; } .ds-pass-stalled .ds-title { margin-top: 5px; font-size: 15px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; } .ds-pass-stalled { border: 2px dashed #d8a92b; box-shadow: none; } .ds-stall { display: flex; flex-wrap: wrap; gap: 2px 7px; align-items: center; margin-top: 8px; color: #ee8479; } .ds-stall .ds-main { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; } .ds-stall .ds-sub { font-size: 12px; font-weight: 600; color: #c9c5ba; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Composer",
+      "kind": "input",
+      "refersTo": "composer",
+      "description": "The blank pass at the top: one-sentence prompt, notched tear line, controls.",
+      "html": "<form class=\"ds-composer\"><textarea class=\"ds-prompt\" rows=\"1\" placeholder=\"Describe a change…\"></textarea><div class=\"ds-tear\"><span></span></div><div class=\"ds-controls\"><input class=\"ds-labels\" placeholder=\"Labels: ui, docs\"><button type=\"button\" class=\"ds-btn\">Create ticket</button></div></form>",
+      "css": ".ds-composer { width: 520px; background: #292926; border-radius: 18px; box-shadow: 0 1px 0 rgba(243,240,231,0.05) inset, 0 0 0 1px #2e2e2b; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; } .ds-composer:focus-within { box-shadow: 0 1px 0 rgba(243,240,231,0.05) inset, 0 0 0 1px #2e2e2b, 0 0 0 2px rgba(216,169,43,0.49); } .ds-prompt { display: block; width: 100%; box-sizing: border-box; resize: none; border: 0; background: transparent; color: #f3f0e7; font: inherit; font-size: 18px; line-height: 1.4; padding: 18px 20px 14px; caret-color: #d8a92b; } .ds-prompt:focus { outline: none; } .ds-prompt::placeholder, .ds-labels::placeholder { color: #a19d93; } .ds-tear { position: relative; height: 1px; color: #f3f0e7; } .ds-tear::before, .ds-tear::after { content: \"\"; position: absolute; top: -8px; width: 16px; height: 16px; border-radius: 999px; background: #1c1c1a; } .ds-tear::before { left: -8px; } .ds-tear::after { right: -8px; } .ds-tear span { position: absolute; inset: 0 14px; background-image: linear-gradient(to right, currentColor 55%, transparent 0); background-size: 8px 1px; opacity: 0.35; } .ds-controls { display: flex; align-items: center; gap: 14px; padding: 12px 16px 14px 20px; } .ds-labels { flex: 0 1 190px; background: transparent; border: 1px solid #3a3a37; border-radius: 10px; padding: 7px 11px; font: inherit; font-size: 13px; color: #f3f0e7; caret-color: #d8a92b; } .ds-labels:focus-visible { outline: 2px solid rgba(216,169,43,0.7); outline-offset: 2px; } .ds-btn { margin-left: auto; border: 0; border-radius: 999px; padding: 9px 18px; font: inherit; font-size: 14px; font-weight: 600; background: #d8a92b; color: #1c1b17; cursor: pointer; } .ds-btn:hover { background: #dcb345; } .ds-btn:focus-visible { outline: 2px solid rgba(216,169,43,0.7); outline-offset: 2px; }"
+    },
+    {
+      "name": "Switch",
+      "kind": "custom",
+      "refersTo": "switch",
+      "description": "Ink-on pill switch; it never uses the accent.",
+      "html": "<label class=\"ds-switch\"><input type=\"checkbox\" role=\"switch\" checked> Write it up with Claude</label>",
+      "css": ".ds-switch { display: inline-flex; align-items: center; gap: 9px; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; font-size: 13px; color: #c9c5ba; cursor: pointer; } .ds-switch input { appearance: none; position: relative; width: 42px; height: 26px; margin: 0; border-radius: 999px; background: #1a1a18; box-shadow: inset 0 0 0 1px #3a3a37; transition: background-color 200ms cubic-bezier(0.22, 1, 0.36, 1); cursor: pointer; } .ds-switch input::after { content: \"\"; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 999px; background: #c9c5ba; transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 220ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-switch input:checked { background: #f3f0e7; } .ds-switch input:checked::after { transform: translateX(16px); background: #1c1c1a; } .ds-switch input:focus-visible { outline: 2px solid rgba(216,169,43,0.7); outline-offset: 2px; }"
+    },
+    {
+      "name": "Select",
+      "kind": "input",
+      "refersTo": "select",
+      "description": "Raised 10px select with a hairline border (repo filter, composer repo).",
+      "html": "<select class=\"ds-select\"><option>All repositories</option><option>acme/storefront</option></select>",
+      "css": ".ds-select { appearance: none; background: #292926; color: #f3f0e7; border: 1px solid #3a3a37; border-radius: 10px; padding: 7px 30px 7px 11px; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; font-size: 13px; } .ds-select:hover { border-color: rgba(243,240,231,0.3); } .ds-select:focus-visible { outline: 2px solid rgba(216,169,43,0.7); outline-offset: 2px; }"
+    },
+    {
+      "name": "Mobile Segments",
+      "kind": "nav",
+      "refersTo": "segments",
+      "description": "Under 768px, one stack at a time; the pressed segment takes its state's pass fill and shows its word.",
+      "html": "<nav class=\"ds-seg\"><button class=\"ds-s\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10.1 2.182a10 10 0 0 1 3.8 0\"/><path d=\"M13.9 21.818a10 10 0 0 1-3.8 0\"/><path d=\"M17.609 3.721a10 10 0 0 1 2.69 2.7\"/><path d=\"M2.182 13.9a10 10 0 0 1 0-3.8\"/><path d=\"M20.279 17.609a10 10 0 0 1-2.7 2.69\"/><path d=\"M21.818 10.1a10 10 0 0 1 0 3.8\"/><path d=\"M3.721 6.391a10 10 0 0 1 2.7-2.69\"/><path d=\"M6.391 20.279a10 10 0 0 1-2.69-2.7\"/></svg><span>3</span></button><button class=\"ds-s ds-on\" aria-pressed=\"true\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2\"/></svg><span>Doing</span><span>3</span></button><button class=\"ds-s\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M7.9 20A9 9 0 1 0 4 16.1L2 22Z\"/><path d=\"M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3\"/><path d=\"M12 17h.01\"/></svg><span>1</span></button></nav>",
+      "css": ".ds-seg { display: flex; gap: 2px; padding: 3px; width: 340px; border-radius: 12px; background: #1a1a18; font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", Geist, sans-serif; } .ds-s { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 9px; padding: 7px 8px; font: inherit; font-size: 13px; font-weight: 650; background: transparent; color: #f3f0e7; cursor: pointer; font-variant-numeric: tabular-nums; transition: background-color 180ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-s:hover { background: rgba(243,240,231,0.05); } .ds-s:focus-visible { outline: 2px solid rgba(216,169,43,0.7); outline-offset: 2px; } .ds-on { flex: 1 1 auto; justify-content: center; background: #665628; box-shadow: 0 1px 2px rgba(0,0,0,0.36); } .ds-on:hover { background: #665628; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Wallet of Passes",
+    "overview": "Every ticket is an Apple Wallet pass and every state is a stack of passes. The board refuses the category default of flat grey kanban cards in bordered lanes: six stacks stand side by side, collapsed passes overlap so only their header strips show, and the newest pass in each stack lies open with PassKit anatomy (a header strip carrying repo and issue number, one large primary field, small-caps label-over-value fields, and a boarding-pass tear line). Filing work is one sentence typed into a blank pass at the top.\n\nColor is flat and fully committed, and it belongs to the theme rather than the component. The palette is KeyUp's: the same 15 themes (11 dark, 4 light) with the same values, each setting 16 base tokens from which every nexTix color derives, including the six pass fills. The owner picks a theme in the top bar; until then the OS preference chooses Charcoal & Mustard or Linen & Mustard. The values in this file's frontmatter are Charcoal & Mustard, the default and `:root` fallback; the normative source is the theme table in `web/src/lib/themes.ts` plus the derivation formulas in `web/src/app/globals.css`.\n\nThe board is read at a glance between other tasks, so density is high but calm: one type family, weights doing the hierarchy, exact tabular numerals for time and money, and state always carried three ways (fill, glyph, word).",
+    "keyCharacteristics": [
+      "Passes, not cards: 14px corners, a stacked-card shadow that lifts each top edge over the pass beneath, 14px overlap in a stack.",
+      "One fill per state, derived from the theme; no gradients.",
+      "A single accent reserved for action, focus, selection, caret and live work.",
+      "Label-over-value fields in small caps, values in tabular numerals.",
+      "Contrast and color distance enforced by tests, not by eye."
+    ],
+    "rules": [
+      {
+        "name": "The Sixteen Tokens Rule",
+        "body": "A theme sets exactly 16 base tokens (bg, sidebar, pane, raised, field, line, ink, ink-2, ink-3, ink-4, accent, on-accent, red, rose, green, shadow) on `<html data-theme>`. Every other color is a `color-mix` of those in globals.css. Never hardcode a color in component CSS; derive a token instead. A new theme needs no CSS.",
+        "section": "colors"
+      },
+      {
+        "name": "The Reserved Accent Rule",
+        "body": "The accent marks only the primary action, focus, selection, the caret, and live work (the Doing tint and its live dot). Links stay neutral ink; state hues never borrow the accent.",
+        "section": "colors"
+      },
+      {
+        "name": "The Clear-of-Red Rule",
+        "body": "A running agent or a question for the owner must never read as a failure. Doing is a warmed raised surface, never a full accent fill; Needs Input is inverted ink (bone on dark, ink-black on light). In every theme, Doing and Needs Input sit at OKLab ΔE of 0.2 or more from the Failed fill, and every pair of state fills at 0.1 or more.",
+        "section": "colors"
+      },
+      {
+        "name": "The Gate Rule",
+        "body": "`web/src/lib/themes.test.ts` is the contrast gate: pass titles and 94% pass labels at 4.5:1 on every pass fill, ink-3 at 4.5:1 on ground, raised and pane, button text at 4.5:1 on the accent, and the stalled outline and live dots at 3:1 on the ground. A theme that fails the gate does not ship.",
+        "section": "colors"
+      },
+      {
+        "name": "The Glyph-and-Word Rule",
+        "body": "No state is carried by color alone: every state has a Lucide glyph (Todo circle-dashed, Doing activity, Needs Input message-question, Failed triangle-alert, In Review git-pull-request, Done circle-check) and a word, in stack heads, pass strips and mobile segments.",
+        "section": "colors"
+      },
+      {
+        "name": "The Label-over-Value Rule",
+        "body": "Pass fields follow Wallet: an uppercase tracked label directly over its value. Labels differ from values by caps, tracking and a touch of tone (94% ink), never by a faded grey that fails contrast.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Readout Rule",
+        "body": "Time and money are exact and set in tabular numerals: elapsed time, heartbeat age, cost, counts and issue numbers.",
+        "section": "typography"
+      },
+      {
+        "name": "The Stacked-Card Rule",
+        "body": "Depth belongs to passes in a stack. A new surface is flat with a line ring unless it is a pass or it floats above the board.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Tear Line Rule",
+        "body": "A pass divides header from body with the notched tear line, never with a plain border.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do derive every new color from the 16 theme tokens with `color-mix` in globals.css, and add the check to themes.test.ts.",
+      "Do give every state a fill, a glyph and a word.",
+      "Do keep Doing and Needs Input far from Failed red (ΔE 0.2 or more) in all 15 themes.",
+      "Do set times, costs and counts in tabular numerals.",
+      "Do use the notched tear line between a pass's header and its body.",
+      "Do render disabled primaries neutral: field fill, ink-3 text, hairline ring.",
+      "Do keep pass labels at a 94% ink mix so they pass 4.5:1 on every fill."
+    ],
+    "donts": [
+      "Don't hardcode colors in component CSS or give nexTix its own palette apart from KeyUp's themes.",
+      "Don't fill a Doing pass with the full accent; it reads as Failed where the accent sits near red.",
+      "Don't use the accent for links, hover washes, state hues or decoration; links stay neutral ink.",
+      "Don't put gradients on fills; color is flat at full commitment.",
+      "Don't draw kanban lanes with borders or grey cards; states are stacks of overlapping passes.",
+      "Don't use the pass header strip as a section label; it carries data (repo and issue number)."
+    ]
+  }
+}

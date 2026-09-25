@@ -39,3 +39,9 @@ celerybeat-schedule*
 # Local secrets (GitHub App key)
 secrets/*
 !secrets/README.md
+
+# Impeccable design tool: review captures and machine-local config stay local
+.impeccable/review/
+.impeccable/build/
+.impeccable/mocks/
+.impeccable/config.local.json

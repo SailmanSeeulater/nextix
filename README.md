@@ -131,6 +131,22 @@ can reach and matches its own list to it. Repos the app lost are disabled if the
 tickets, so run history is kept, and removed if they never had one. The sync command
 does the same check, so it also repairs a stale repo list.
 
+## The board
+
+Every ticket is a pass, in the spirit of Apple Wallet, and every state is a stack of
+passes. The newest pass in each stack is open; click any pass to open it.
+
+- **Doing** passes show a live readout: elapsed time while the agent's heartbeat is fresh,
+  or a hollow pass reading "No heartbeat" when it goes quiet for 30 seconds. Stalled passes
+  move to the front of the stack.
+- **Needs Input** is the brightest pass on the board: it's waiting on you.
+- **The composer** at the top files a ticket in one sentence. Press Enter to create it;
+  Shift+Enter adds a line. "Write it up with Claude" turns the sentence into a structured
+  issue; switch it off to file your text as-is.
+- **Themes**: the palette button in the top bar offers the same 15 themes as KeyUp. The
+  choice is saved in your browser; until you pick one, the board follows your OS light or
+  dark setting. Every theme passes an automated contrast check (`web/src/lib/themes.test.ts`).
+
 ## Creating tickets
 
 Install the CLI and sign in (details in [cli/README.md](cli/README.md)):

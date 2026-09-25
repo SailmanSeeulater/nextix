@@ -47,3 +47,12 @@ Setup: `ANTHROPIC_API_KEY` set in `.env`, `docker compose up -d`, `pip install -
 - [ ] `nextix open <n>` opens the issue in the browser
 - [ ] With `ANTHROPIC_API_KEY` removed, `nextix new "x"` explains that triage needs the key and suggests `--no-triage`
 - [ ] `nextix new "x" --repo you/not-installed` says the repo isn't connected
+
+## Board redesign (Wallet passes, KeyUp themes)
+
+- [ ] The board shows six stacks of passes; the newest pass in each is open and clicking another opens it
+- [ ] A running agent's pass shows a large elapsed readout; stop its heartbeat for 30s and it turns hollow with "No heartbeat" and moves to the front
+- [ ] Typing a sentence in the composer and pressing Enter creates the ticket; its pass grows out of the composer into Todo (or Needs Input with Claude's question shown under the composer)
+- [ ] A ticket that changes state on GitHub slides from one stack to the other without a reload
+- [ ] The palette button lists 15 themes; picking one recolors the board immediately and survives a reload
+- [ ] At phone width, a segmented switcher shows all six states with counts

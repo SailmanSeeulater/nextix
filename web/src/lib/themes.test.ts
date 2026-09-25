@@ -57,12 +57,10 @@ describe.each(THEMES.map((t) => [t.name, t] as const))("%s", (_name, theme) => {
     }
   });
 
-  it("keeps ground text, links and the primary button readable", () => {
+  it("keeps ground text and the primary button readable", () => {
     expect(contrast(hex(t.ink3), hex(t.bg)), "tertiary ink on ground").toBeGreaterThanOrEqual(AA);
     expect(contrast(hex(t.ink3), hex(t.raised)), "tertiary ink on surface").toBeGreaterThanOrEqual(AA);
     expect(contrast(hex(t.ink3), hex(t.pane)), "tertiary ink in the theme popover").toBeGreaterThanOrEqual(AA);
-    const accentText = mix(hex(t.accent), 0.85, hex(t.ink));
-    expect(contrast(accentText, hex(t.bg)), "accent link on ground").toBeGreaterThanOrEqual(AA);
     expect(contrast(hex(t.onAccent), hex(t.accent)), "button text").toBeGreaterThanOrEqual(AA);
   });
 
