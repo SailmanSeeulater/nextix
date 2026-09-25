@@ -110,3 +110,11 @@ async def test_filters(client: httpx.AsyncClient, session: AsyncSession) -> None
     assert [c["issue_number"] for c in by_col] == [2]
     bad = await client.get("/api/tickets?column=nope", headers=AUTH)
     assert bad.status_code == 422
+
+
+async def test_repos_lists_enabled_only(client: httpx.AsyncClient, session: AsyncSession) -> None:
+    await seed(session)
+    assert (await client.get("/api/repos")).status_code == 401
+    r = await client.get("/api/repos", headers=AUTH)
+    assert r.status_code == 200
+    assert [x["full_name"] for x in r.json()] == ["acme/gadgets", "acme/widgets"]
