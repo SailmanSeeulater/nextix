@@ -131,6 +131,30 @@ can reach and matches its own list to it. Repos the app lost are disabled if the
 tickets, so run history is kept, and removed if they never had one. The sync command
 does the same check, so it also repairs a stale repo list.
 
+## Creating tickets
+
+Install the CLI and sign in (details in [cli/README.md](cli/README.md)):
+
+```bash
+pip install -e ./cli
+nextix login
+```
+
+Then describe a change:
+
+```bash
+nextix new "add a dark mode toggle to settings" --repo owner/name
+```
+
+Claude turns the prompt into a GitHub issue with context, acceptance criteria, and
+likely files, labeled `nextix`. If the request is too vague, the issue gets the
+`nextix:needs-input` label, Claude's clarifying question is posted as a comment, and the
+card lands in **Needs Input**. `--no-triage` skips Claude and files your text as-is.
+
+Triage needs `ANTHROPIC_API_KEY` in `.env` and uses `ANTHROPIC_MODEL` (default
+`claude-opus-5`). Refused requests are retried on Anthropic's recommended fallback
+model automatically. Claude may only apply labels that already exist in the repo.
+
 ## Developing without compose
 
 Backend (Python 3.12):
@@ -183,7 +207,7 @@ Built in phases; see the build spec.
 
 - [x] Phase 0: scaffolding, compose, CI
 - [x] Phase 1: GitHub App, webhooks, backfill, live read-only board
-- [ ] Phase 2: ticket creation (`nextix new`, triage, needs-input)
+- [x] Phase 2: ticket creation (`nextix new`, triage, needs-input)
 - [ ] Phase 3: agent runner end to end
 - [ ] Phase 4: review surface (diff, screenshots, checks)
 - [ ] Phase 5: feedback loop

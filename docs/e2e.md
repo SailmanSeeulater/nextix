@@ -30,3 +30,20 @@ smee forwarding running.
 - [ ] Stop the api container, label another issue, start it again, then run
       `docker compose exec api python -m nextix.sync owner/repo`. The missed issue appears
 - [ ] The repo filter at the top narrows the board to one repo
+
+## Phase 2
+
+Setup: `ANTHROPIC_API_KEY` set in `.env`, `docker compose up -d`, `pip install -e ./cli`,
+`nextix login` (API URL uses your `API_PORT`), default repo set to the throwaway repo.
+
+- [ ] `nextix new "add a CONTRIBUTING.md that explains how to run the tests"` prints the issue and board links
+- [ ] The issue has a short imperative title and Context, Acceptance criteria (checkboxes), and Likely files sections, plus the original request in a collapsed block
+- [ ] The issue is labeled `nextix`; any other labels already existed in the repo
+- [ ] The card appears in **Todo** on the board without reloading
+- [ ] `nextix new "make it better"` lands in **Needs Input**, with a sensible question posted as a comment and the `nextix:needs-input` label
+- [ ] Removing `nextix:needs-input` on GitHub moves that card to **Todo**
+- [ ] `nextix new "Add a LICENSE file" --no-triage --label chore` files the text as-is with labels `nextix` and `chore`
+- [ ] `nextix ls` and `nextix ls --column needs_input` list the right tickets
+- [ ] `nextix open <n>` opens the issue in the browser
+- [ ] With `ANTHROPIC_API_KEY` removed, `nextix new "x"` explains that triage needs the key and suggests `--no-triage`
+- [ ] `nextix new "x" --repo you/not-installed` says the repo isn't connected
