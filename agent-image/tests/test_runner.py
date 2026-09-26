@@ -292,6 +292,7 @@ RESULT_FIELDS = {
     "output_tokens",
     "cost_usd",
     "num_turns",
+    "tests",  # docs/phase4.md
 }
 
 
@@ -792,6 +793,7 @@ async def test_changes_are_committed_and_bundled(tmp_path: Path, origin: Path) -
         "output_tokens": 340,
         "cost_usd": 0.42,
         "num_turns": 4,
+        "tests": None,  # no test command configured
     }
 
     bundle = bundle_path(tmp_path)
