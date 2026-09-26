@@ -200,6 +200,11 @@ def sandbox_env(
     }
 
 
+# Handed to the sandbox as a file, not as environment (see sandbox.SECRETS_DIR).
+SECRET_ENV_VARS = frozenset(
+    {"GITHUB_TOKEN", "NEXTIX_CALLBACK_SECRET", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
+)
+
 # One environment variable must stay under Linux's 128 KiB; leave room for the rest.
 MAX_TASK_BYTES = 100_000
 MAX_REVIEW_COMMENTS = 50
@@ -656,20 +661,22 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
             )
             clarification = await clarification_for(session, run, ticket, repo, ctx)
             review_comments = await review_comments_for(run, ticket, repo, ctx)
+            env = sandbox_env(
+                settings=ctx.settings,
+                run=run,
+                ticket=ticket,
+                repo=repo,
+                clone_token=clone_token,
+                clarification=clarification,
+                config=repo_config.config,
+                limits=limits,
+                review_comments=review_comments,
+            )
             spec = SandboxSpec(
                 run_id=run.id,
                 image=ctx.settings.agent_image,
-                env=sandbox_env(
-                    settings=ctx.settings,
-                    run=run,
-                    ticket=ticket,
-                    repo=repo,
-                    clone_token=clone_token,
-                    clarification=clarification,
-                    config=repo_config.config,
-                    limits=limits,
-                    review_comments=review_comments,
-                ),
+                env={k: v for k, v in env.items() if k not in SECRET_ENV_VARS},
+                secrets={k: v for k, v in env.items() if k in SECRET_ENV_VARS},
                 owner=sandbox_owner(),
                 network=ctx.settings.agent_network or None,
                 mem_limit=ctx.settings.agent_mem_limit,

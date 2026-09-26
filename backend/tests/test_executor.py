@@ -228,14 +228,23 @@ async def test_a_successful_run_pushes_the_branch_and_opens_a_pr(
     sandbox, pusher = FakeSandbox(SUCCESS), FakePusher()
     await execute_run(run.id, ctx(session_factory, gh, publisher, sandbox, pusher))
 
-    # The sandbox got a read-only token and exactly one Claude credential.
+    # The sandbox got a read-only token and exactly one Claude credential, as a secrets
+    # file: none of them is in the container's environment (PID 1's environ is readable).
     [spec] = sandbox.specs
-    env = spec.env
-    assert env["GITHUB_TOKEN"] == "ghs_read_token"
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == PLAN_TOKEN and "ANTHROPIC_API_KEY" not in env
+    env, secrets = spec.env, spec.secrets
+    assert set(secrets) == {"GITHUB_TOKEN", "NEXTIX_CALLBACK_SECRET", "CLAUDE_CODE_OAUTH_TOKEN"}
+    assert secrets["GITHUB_TOKEN"] == "ghs_read_token"
+    assert secrets["CLAUDE_CODE_OAUTH_TOKEN"] == PLAN_TOKEN
+    assert len(secrets["NEXTIX_CALLBACK_SECRET"]) == 64
+    assert not set(env) & {
+        "GITHUB_TOKEN",
+        "NEXTIX_CALLBACK_SECRET",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+    }
+    assert not any(value in v for value in secrets.values() for v in env.values())
     assert env["NEXTIX_BRANCH"] == "nextix/issue-7" and env["NEXTIX_REPO"] == "acme/widgets"
     assert json.loads(env["NEXTIX_TASK_JSON"])["title"] == "Add dark mode"
-    assert len(env["NEXTIX_CALLBACK_SECRET"]) == 64
     assert spec.network == "nextix_agents"
     assert PLAN_TOKEN not in repr(spec) and "ghs_" not in repr(spec)
 
@@ -1039,3 +1048,22 @@ def test_model_routes_are_parsed_leniently() -> None:
     assert config.model_routes == [("nextix:small", "haiku"), ("big", "opus")]
     assert config.model_for(["BIG"]) == "opus"
     assert config.model_for(["other"]) == config.anthropic_model
+
+
+def test_the_secrets_file_is_readable_only_by_the_sandbox_user() -> None:
+    import io
+    import tarfile
+
+    from nextix.runs.sandbox import secrets_archive
+
+    data = secrets_archive({"GITHUB_TOKEN": "ghs_x"})
+    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+        [member] = tar.getmembers()
+        assert (member.name, member.mode, member.uid, member.gid) == (
+            "secrets.json",
+            0o400,
+            1000,
+            1000,
+        )
+        extracted = tar.extractfile(member)
+        assert extracted is not None and json.loads(extracted.read()) == {"GITHUB_TOKEN": "ghs_x"}

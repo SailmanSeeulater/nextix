@@ -6,6 +6,7 @@ SDK (the worker has the host's Docker socket; sandboxes never do). Tests use a f
 
 import contextlib
 import io
+import json
 import logging
 import tarfile
 import uuid
@@ -19,8 +20,26 @@ RUN_LABEL = "nextix.run_id"
 # "<worker boot id>:<pid>" of the worker process watching the sandbox (see executor).
 OWNER_LABEL = "nextix.owner"
 OUT_DIR = "/work/.nextix-out"
+# Secrets go in as a file the runner reads and deletes first, never as container
+# environment: every process of the agent's uid can read PID 1's /proc/1/environ.
+SECRETS_DIR = "/run/nextix"
+SECRETS_FILE = "secrets.json"
+SANDBOX_UID = 1000
 RESULT_PATH = f"{OUT_DIR}/result.json"
 BUNDLE_PATH = f"{OUT_DIR}/branch.bundle"
+
+
+def secrets_archive(secrets: dict[str, str]) -> bytes:
+    """A tar holding secrets.json, readable only by the sandbox user (0400, uid 1000)."""
+    payload = json.dumps(secrets).encode("utf-8")
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        info = tarfile.TarInfo(SECRETS_FILE)
+        info.size = len(payload)
+        info.mode = 0o400
+        info.uid = info.gid = SANDBOX_UID
+        tar.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
 
 
 def container_name(run_id: uuid.UUID) -> str:
@@ -31,8 +50,9 @@ def container_name(run_id: uuid.UUID) -> str:
 class SandboxSpec:
     run_id: uuid.UUID
     image: str
-    env: dict[str, str] = field(repr=False)  # holds credentials: never printed
+    env: dict[str, str]  # no secrets here; see `secrets`
     owner: str = ""
+    secrets: dict[str, str] = field(default_factory=dict, repr=False)  # never printed
     network: str | None = None
     mem_limit: str = "4g"
     nano_cpus: int = 2_000_000_000
@@ -77,9 +97,8 @@ class DockerSandbox:
         self._docker = docker.from_env()
 
     def start(self, spec: SandboxSpec) -> str:
-        container = self._docker.containers.run(
+        container = self._docker.containers.create(
             spec.image,
-            detach=True,
             # A recognisable name in Docker Desktop, instead of a random one.
             name=container_name(spec.run_id),
             init=True,  # reap processes the agent leaves behind; the runner isn't PID 1
@@ -101,6 +120,14 @@ class DockerSandbox:
             },
             # No volumes, no binds, no Docker socket, no privileged mode.
         )
+        try:
+            if not container.put_archive(SECRETS_DIR, secrets_archive(spec.secrets)):
+                raise RuntimeError("could not hand the secrets to the sandbox")
+            container.start()
+        except Exception:
+            with contextlib.suppress(Exception):
+                container.remove(force=True)
+            raise
         return str(container.id)
 
     def _get(self, container_id: str):  # type: ignore[no-untyped-def]

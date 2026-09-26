@@ -48,7 +48,10 @@ KNOWN_TOOLS = frozenset(
 )
 
 Command = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
-RoutePath = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^/", max_length=500)]
+# A URL path on the app: starts with "/", no control characters.
+RoutePath = Annotated[
+    str, StringConstraints(strip_whitespace=True, pattern=r"^/[^\x00-\x1f\x7f]*$", max_length=500)
+]
 
 
 class _Strict(BaseModel):
