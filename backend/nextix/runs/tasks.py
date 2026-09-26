@@ -12,6 +12,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 import redis.asyncio as aioredis
@@ -31,6 +32,7 @@ from nextix.runs.sandbox import DockerSandbox, Sandbox
 log = logging.getLogger(__name__)
 
 GITHUB_HTTP_TIMEOUT_S = 20.0
+DOCKER_SOCKET = "/var/run/docker.sock"
 
 
 @asynccontextmanager
@@ -61,12 +63,19 @@ async def _execute(run_id: uuid.UUID) -> None:
         await execute_run(run_id, ctx)
 
 
-async def _reap() -> list[uuid.UUID]:
+def _reaper_sandbox() -> Sandbox | None:
+    """The ordinary worker has no Docker socket by design: the runner removes a reaped
+    run's container (it sees the terminal status). Kill it here too when we can."""
+    if not Path(DOCKER_SOCKET).exists():
+        return None
     try:
-        sandbox: Sandbox | None = DockerSandbox()
+        return DockerSandbox()
     except Exception:
-        log.warning("Docker is unreachable; reaping without killing containers")
-        sandbox = None
+        log.exception("the Docker socket is present but unusable")
+        return None
+
+
+async def _reap(sandbox: Sandbox | None) -> list[uuid.UUID]:
     async with worker_context(sandbox=sandbox) as ctx, ctx.sessions() as session:
         return await reap(
             session,
@@ -84,4 +93,4 @@ def execute_run_task(run_id: str) -> None:
 
 @celery_app.task(name="nextix.reap_runs", ignore_result=True)
 def reap_runs_task() -> list[str]:
-    return [str(r) for r in asyncio.run(_reap())]
+    return [str(r) for r in asyncio.run(_reap(_reaper_sandbox()))]
