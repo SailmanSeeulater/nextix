@@ -230,23 +230,32 @@ On the board, open a pass and click **Details** (or go to
 The pull request is an ordinary GitHub PR from `nextix/issue-N`: read the diff, run it,
 and merge when you're happy. Merging moves the ticket to **Done** and closes the issue.
 
-If it needs changes, you have two options:
+If it needs changes, you have three options:
 
+- **Review it on GitHub** (the usual way). Leave a review with **Request changes**, or a
+  **Comment** review with inline comments on the lines to change. The agent picks it up
+  within seconds: "🕒 Queued for an agent … to address @you's review". It gets your
+  review's text and every inline comment (file and line), works on the same branch, and
+  pushes new commits to the **same PR**; the closing comment says "✅ Updated PR #n to
+  address @you's review". An **Approve** never starts a run. If you review while an agent
+  is still working, your review waits and starts as soon as that run ends.
 - **Fix it yourself** on the branch, like any PR.
-- **Send the agent back**: edit the issue description to say what to change, then press
-  **Retry** on the ticket page. The next run starts from the existing branch, adds
-  commits, and updates the same PR. To start over instead, close the PR and delete the
-  `nextix/issue-N` branch first. (Agents reading PR review comments directly is planned
-  for a later version.)
+- **Start over**: edit the issue description, then press **Run again** on the ticket page
+  (or drag the pass from **In Review** back to **Todo** on the board). To throw the old
+  work away completely, close the PR and delete the `nextix/issue-N` branch first.
+
+Only reviews from you (the repo owner) or `NEXTIX_ALLOWED_GITHUB_USERS` reach the agent;
+other people's reviews are ignored.
 
 ### When the agent asks a question
 
 The ticket moves to **Needs Input**, the issue gets the `nextix:needs-input` label, and
 the question is posted as a comment. To answer:
 
-1. **Reply on the issue** with your answer (a normal comment).
-2. **Remove the `nextix:needs-input` label** on GitHub. That starts a new run.
-   (Or press **Retry** on the ticket page; it removes the label for you.)
+1. **Reply on the issue** with your answer (a normal comment). That's it: your reply
+   starts a new run, and nexTix removes the `nextix:needs-input` label for you.
+2. (Removing the label yourself, or pressing **Retry** on the ticket page, also starts a
+   run, for example if you answered by editing the issue description instead.)
 
 The new run gets the question and your reply. Only replies from you (the repo owner) or
 `NEXTIX_ALLOWED_GITHUB_USERS` are passed to the agent; other people's comments are
@@ -316,6 +325,45 @@ to 120`). Fix it on `main` and press **Retry**.
 On your plan nothing is billed per run; the cost figure is Claude Code's estimate, and
 it still stops a run that would use too much of your allowance. After changing any of
 these, restart the runner: `docker compose restart runner`.
+
+### Retry and rerun from the board
+
+Drag a pass from **Failed** onto **Todo** to retry it, or from **In Review** onto
+**Todo** to run it again on the same branch (you'll be asked to confirm, because it
+cancels anything still running). Other drags are refused: GitHub decides where tickets
+go. On a phone, press and hold a pass to drag it. Every open pass also has a **Retry** or
+**Run again** button, so you never have to drag.
+
+### What it costs
+
+The **Costs** link in the top bar shows the last 7, 30, or 90 days: total cost, runs,
+and tokens, a cost-per-day chart, and the most expensive repos and tickets. The figures
+are Claude Code's own estimate for each run (every token priced at API rates). On your
+Claude plan nothing is billed per run; the figures show how much of your allowance
+agents are using. Triage (Claude writing up a ticket) isn't included.
+
+### Use nexTix from Claude Code (MCP)
+
+After `nextix login`, register the MCP server once:
+
+```bash
+claude mcp add nextix -- nextix mcp
+```
+
+Claude Code can then file tickets ("file a nexTix ticket to add dark mode"), list the
+board, and check on a ticket (`#12`, or `owner/name#12`).
+
+### Running more than one agent, and choosing models
+
+- `RUNNER_CONCURRENCY` (default 1) is how many agents work at once. On your Claude plan,
+  keep it at 1: parallel agents share one allowance.
+- `NEXTIX_MAX_RUNS_PER_REPO` (default 1) stops two agents working on the same repo at
+  once; the second waits its turn.
+- `NEXTIX_MODEL_ROUTES` picks the agent's model by label, for example
+  `nextix:small=claude-haiku-4-5` so tickets labelled `nextix:small` use a cheaper,
+  faster model. The model each run used is shown on the ticket page.
+
+Restart after changing these: `docker compose up -d`.
 
 ### Themes
 

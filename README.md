@@ -267,6 +267,38 @@ test result and a per-route change table. Test reports and screenshots are store
 `ARTIFACT_DIR` and served at `/api/artifacts/<id>`. Contracts and decisions:
 [docs/phase4.md](docs/phase4.md).
 
+## The feedback loop
+
+- **Review comments go back to the agent.** A "Request changes" review, or a comment
+  review with a body or inline comments, from the repo owner or an allowed user starts a
+  `review_feedback` run on the same branch. The agent gets the review text and each inline
+  comment (file and line), commits on top, and the worker updates the same PR. A review
+  that arrives while a run is active waits and starts when it ends. Approvals and other
+  people's reviews never start runs.
+- **Answering a question is a comment.** When a ticket waits in Needs Input, the owner's
+  reply on the issue starts the next run (the question and the reply are passed to the
+  agent) and removes `nextix:needs-input`.
+- **Board actions.** Drag a pass from Failed to Todo to retry it, or from In Review to
+  Todo to cancel any active run and run it again (`POST /api/tickets/{id}/rerun`). The
+  ticket page has the same actions as buttons.
+
+Details: [docs/phase5.md](docs/phase5.md).
+
+## Scale and extras
+
+- **Concurrency:** `RUNNER_CONCURRENCY` (default 1) runs that many agents at once;
+  `NEXTIX_MAX_RUNS_PER_REPO` (default 1) keeps agents from racing on one repo. On a
+  Claude plan keep one at a time: parallel runs share one allowance.
+- **Costs:** `GET /api/costs?days=30` and the board's Costs page break down cost and
+  tokens by day, repo, and ticket (Claude Code's estimates when you're on a plan).
+- **MCP:** `nextix mcp` exposes `create_ticket`, `list_tickets`, and `get_ticket_status`
+  to Claude Code (`claude mcp add nextix -- nextix mcp`) or Claude Desktop.
+- **Model routing:** `NEXTIX_MODEL_ROUTES=nextix:small=claude-haiku-4-5,...` picks the
+  agent's model from the ticket's labels; the model used is shown per run.
+- **Temporal:** a design note for moving off Celery, [docs/temporal.md](docs/temporal.md).
+
+Details: [docs/phase6.md](docs/phase6.md).
+
 ## Developing without compose
 
 Backend (Python 3.12):
@@ -332,6 +364,6 @@ Built in phases; see the build spec.
 - [x] Phase 1: GitHub App, webhooks, backfill, live read-only board
 - [x] Phase 2: ticket creation (`nextix new`, triage, needs-input)
 - [x] Phase 3: agent runner end to end
-- [ ] Phase 4: review surface (diff, screenshots, checks)
-- [ ] Phase 5: feedback loop
-- [ ] Phase 6: scale and extras
+- [x] Phase 4: review surface (diff, screenshots, checks)
+- [x] Phase 5: feedback loop
+- [x] Phase 6: scale and extras
