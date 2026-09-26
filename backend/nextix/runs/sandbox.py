@@ -20,6 +20,10 @@ RESULT_PATH = f"{OUT_DIR}/result.json"
 BUNDLE_PATH = f"{OUT_DIR}/branch.bundle"
 
 
+def container_name(run_id: uuid.UUID) -> str:
+    return f"nextix-run-{run_id.hex[:12]}"
+
+
 @dataclass(frozen=True)
 class SandboxSpec:
     run_id: uuid.UUID
@@ -65,6 +69,8 @@ class DockerSandbox:
         container = self._docker.containers.run(
             spec.image,
             detach=True,
+            # A recognisable name in Docker Desktop, instead of a random one.
+            name=container_name(spec.run_id),
             init=True,  # reap processes the agent leaves behind; the runner isn't PID 1
             environment=spec.env,
             labels={RUN_LABEL: str(spec.run_id)},
