@@ -25,7 +25,7 @@ images, and a backend-only repo gracefully shows the diff and tests only.
    branch too, not the previous attempt.
 4. **Screenshots are viewport-sized** (default 1280×800, per-route override) with
    animations disabled, so before and after have the same dimensions and pixel diffs are
-   meaningful. Pixel matching uses pixelmatch (threshold 0.1, anti-aliasing ignored).
+   meaningful. Pixel matching uses pixelmatch (threshold 0.02 so subtle colour changes count, anti-aliasing ignored).
 5. **Tests never block the PR** (spec). The runner runs `test` after the agent, stores the
    output as a `test_report` artifact, and the result is shown in the PR body, the closing
    comment, and the Checks tab.

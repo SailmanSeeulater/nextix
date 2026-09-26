@@ -201,10 +201,13 @@ ARTIFACT_FILE_MAX_BYTES = 10 * 1024 * 1024
 ARTIFACTS_MAX_BYTES = 60 * 1024 * 1024
 ARTIFACTS_MAX_FILES = 64  # manifest.json included
 
-# Pixel diffs: pixelmatch with threshold 0.1; anti-aliased pixels are detected and not
-# counted. Only the box around the changed pixels (plus a margin wide enough for the
-# anti-aliasing check) goes through pixelmatch, which is pure Python.
-DIFF_THRESHOLD = 0.1
+# Pixel diffs: pixelmatch with threshold 0.02; anti-aliased pixels are detected and not
+# counted. pixelmatch's default (0.1) is tuned for noisy captures and ignores subtle
+# colour changes: #f6f5f1 -> #eff6ff is a YIQ delta of ~25, under the 0.1 cut-off of ~352
+# (0.02: ~14). Sandbox captures are deterministic (an unchanged page diffs to exactly 0),
+# so the tighter threshold only adds real changes. Only the box around the changed pixels
+# (plus a margin for the anti-aliasing check) goes through pixelmatch (pure Python).
+DIFF_THRESHOLD = 0.02
 DIFF_MARGIN_PX = 3
 DIFF_PAD_RGBA = (128, 128, 128, 255)  # neutral grey where one screenshot is smaller
 DIFF_FADE_ALPHA = 0.1  # unchanged pixels: the before image, faded, as pixelmatch draws it

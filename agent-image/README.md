@@ -151,7 +151,7 @@ takes a viewport-sized PNG with animations disabled (so an infinite spinner does
 up as a change). A navigation error, an HTTP status of 400 or more, or a timeout records
 an error for that route and the others go on.
 
-Diffs use pixelmatch (threshold 0.1; anti-aliased pixels are detected and not counted):
+Diffs use pixelmatch (threshold 0.02, so subtle colour changes count; anti-aliased pixels are detected and not counted):
 changed pixels in red, anti-aliasing in yellow, everything else the before image faded.
 Screenshots of different sizes are both padded to the larger size on neutral grey first.
 Only the box around the changed pixels goes through pixelmatch, which is pure Python; the

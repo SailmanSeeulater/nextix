@@ -685,8 +685,8 @@ def test_diffing_only_the_changed_box_matches_pixelmatch_on_the_whole_image() ->
     ImageDraw.Draw(first).text((20, 30), "Settings saved", fill=(20, 20, 20, 255))
     ImageDraw.Draw(second).text((21, 30), "Settings saved", fill=(20, 20, 20, 255))
     ImageDraw.Draw(second).text((20, 80), "New line", fill=(200, 30, 30, 255))
-    whole = pixelmatch(first, second, None, threshold=0.1, includeAA=False)
-    with_aa = pixelmatch(first, second, None, threshold=0.1, includeAA=True)
+    whole = pixelmatch(first, second, None, threshold=runner.DIFF_THRESHOLD, includeAA=False)
+    with_aa = pixelmatch(first, second, None, threshold=runner.DIFF_THRESHOLD, includeAA=True)
     encoded = []
     for image in (first, second):
         buffer = io.BytesIO()
@@ -1515,3 +1515,18 @@ def test_no_secrets_file_is_fine(tmp_path: Path) -> None:
     environ: dict[str, str] = {}
     assert runner.load_secrets_file(environ, tmp_path / "missing.json") is False
     assert environ == {}
+
+
+def test_a_subtle_background_change_counts() -> None:
+    """The live sample: a pale blue panel (#eff6ff) on the page colour (#f6f5f1)."""
+    from PIL import Image
+
+    def encode(image: Image.Image) -> bytes:
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+        return out.getvalue()
+
+    before = Image.new("RGBA", (40, 40), (246, 245, 241, 255))
+    after = before.copy()
+    after.paste((239, 246, 255, 255), (10, 10, 30, 30))
+    assert runner.pixel_diff(encode(before), encode(after)).diff_pixels == 400
