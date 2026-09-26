@@ -61,6 +61,12 @@
   /* Apple platforms render SF, Wallet's own face; everywhere else gets self-hosted Geist,
      the closest open grotesque in character. SF itself can't be licensed for the web. */
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-geist), sans-serif;
+  /* Only for verbatim tool output and input in a transcript: that text is literally a
+     terminal's, and its columns only line up in a fixed-width face. Nowhere else. */
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  /* Things that float above the page (the theme popover, the jump-to-latest pill). */
+  --shadow-float:
+    0 18px 40px -18px var(--shadow), 0 2px 6px color-mix(in srgb, var(--shadow) 35%, transparent);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -337,6 +343,11 @@ a {
   user-select: none;
 }
 
+.switch-meta {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
 .switch input {
   appearance: none;
   position: relative;
@@ -420,6 +431,26 @@ a {
 .button[aria-busy="true"] {
   opacity: 0.85;
   cursor: progress;
+}
+
+a.button {
+  text-decoration: none;
+}
+
+/* The quiet partner of the one primary: ink on the ground inside a hairline ring. */
+.button[data-variant="secondary"] {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.button[data-variant="secondary"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.button[data-variant="secondary"]:disabled {
+  background: var(--surface-2);
+  color: var(--ink-3);
 }
 
 .spin {
@@ -975,7 +1006,7 @@ a {
   border-radius: 16px;
   background: var(--pane);
   border: 1px solid var(--line);
-  box-shadow: 0 18px 40px -18px var(--shadow), 0 2px 6px color-mix(in srgb, var(--shadow) 35%, transparent);
+  box-shadow: var(--shadow-float);
   color: var(--ink);
 }
 
@@ -1093,4 +1124,635 @@ a {
 
 .signin-head {
   padding: 16px 18px 18px;
+}
+
+/* ------------------------------------------------------------------ ticket detail */
+
+.detail {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 16px 120px;
+}
+
+@media (min-width: 640px) {
+  .detail {
+    padding-inline: 24px;
+  }
+}
+
+.detail-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 0 18px;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -4px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.back-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+/* The ticket as one large open pass. */
+.detail-pass-head {
+  padding: 16px 20px 20px;
+}
+
+.detail-pass .pass-strip {
+  font-size: 11.5px;
+}
+
+.detail-state {
+  padding-right: 7px;
+  border-right: 1px solid color-mix(in srgb, var(--pass-label) 45%, transparent);
+  white-space: nowrap;
+}
+
+.detail-pass .pass-header-field {
+  font-size: 13px;
+}
+
+.detail-title {
+  margin-top: 10px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.detail-pass .pass-readout {
+  margin-top: 12px;
+}
+
+.detail-pass .pass-fields {
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 14px 18px;
+  padding: 16px 20px 6px;
+}
+
+.detail-pass .pass-field dd {
+  font-size: 15px;
+}
+
+.pass-field dd.pass-field-detail {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pass-label);
+}
+
+/* The agent's question, as a label-over-value field that spans the pass. */
+.detail-pass-question {
+  max-width: 72ch;
+  padding: 12px 20px 0;
+}
+
+.detail-pass-question-label {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pass-label);
+}
+
+.detail-pass-question-text {
+  margin-top: 3px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.detail-pass-note {
+  max-width: 72ch;
+  padding: 8px 20px 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--pass-label);
+}
+
+.detail-pass .pass-links {
+  padding: 14px 20px 20px;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.detail-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.attempt-picker .select {
+  max-width: 260px;
+}
+
+.cancel-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.cancel-confirm-text {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.detail-note {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.detail-note[data-tone="error"] {
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.issue-body {
+  margin-top: 22px;
+}
+
+.issue-body summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.issue-body summary::-webkit-details-marker {
+  display: none;
+}
+
+.issue-body summary:hover {
+  color: var(--ink);
+}
+
+.issue-body-text {
+  max-width: 76ch;
+  margin-top: 8px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-surface);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.issue-body-text p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.issue-body-text p + p {
+  margin-top: 10px;
+}
+
+/* ------------------------------------------------------------------ transcript */
+
+.transcript {
+  margin-top: 28px;
+}
+
+.transcript-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0 11px;
+  background: var(--ground);
+  border-bottom: 1px solid var(--line);
+}
+
+.transcript-title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.transcript-signal {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.transcript-signal svg {
+  color: var(--ink-3);
+}
+
+.transcript-signal[data-state="reconnecting"] svg {
+  color: var(--danger);
+}
+
+.transcript-signal .live-dot {
+  color: var(--accent);
+}
+
+.transcript-note {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.transcript-note[data-tone="error"] {
+  color: var(--danger);
+}
+
+.transcript-note .link-button,
+.transcript-empty .link-button {
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+}
+
+.transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 18px 0 0;
+  list-style: none;
+}
+
+/* Assistant text: readable prose, the transcript's main voice. */
+.t-message {
+  max-width: 72ch;
+  padding: 8px 0 6px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.t-message p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.t-message p + p {
+  margin-top: 10px;
+}
+
+/* Runner status: quiet. */
+.t-log {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 1px 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.t-log svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.t-log span {
+  overflow-wrap: anywhere;
+}
+
+/* State changes: a small divider. */
+.t-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
+
+.t-state::before,
+.t-state::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.t-state time {
+  font-weight: 500;
+}
+
+/* Errors: prominent, in the theme red. */
+.t-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+.t-error svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.t-error p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A tool call and its result, collapsed to one line. */
+.t-tool {
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-surface);
+}
+
+.t-tool summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  list-style: none;
+}
+
+.t-tool summary::-webkit-details-marker {
+  display: none;
+}
+
+.t-tool summary:hover .t-tool-summary {
+  color: var(--ink);
+}
+
+.t-chevron {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform 160ms var(--ease-out);
+}
+
+.t-tool details[open] .t-chevron,
+.issue-body[open] .t-chevron {
+  transform: rotate(90deg);
+}
+
+.t-tool-icon {
+  flex: none;
+  color: var(--ink-2);
+}
+
+.t-tool-name {
+  flex: none;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.t-tool-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.t-tool-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink-3);
+}
+
+.t-tool[data-error="true"] .t-tool-status {
+  color: var(--danger);
+}
+
+.t-tool-body {
+  display: grid;
+  gap: 6px;
+  padding: 2px 12px 12px 34px;
+}
+
+.t-raw-label {
+  margin-top: 4px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.t-raw {
+  max-height: 440px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--ground);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+
+.t-raw[data-error="true"] {
+  color: var(--danger);
+}
+
+.t-raw-empty {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.transcript-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 18px;
+  padding: 18px 16px;
+  border: 1.5px dashed var(--hairline);
+  border-radius: var(--radius-pass);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.transcript-empty svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.transcript-empty[data-tone="error"],
+.transcript-empty[data-tone="error"] svg {
+  color: var(--danger);
+}
+
+.jump-latest {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--pane);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-float);
+  cursor: pointer;
+  transform: translateX(-50%);
+  animation: jump-in 200ms var(--ease-out);
+}
+
+.jump-latest:hover {
+  background: var(--surface);
+}
+
+@keyframes jump-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+/* ------------------------------------------------------------------ notice page */
+
+.notice-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.notice-pass {
+  width: min(420px, 100%);
+  --pass-bg: var(--pass-todo);
+  --pass-ink: var(--pass-todo-ink);
+}
+
+.notice-head {
+  padding: 18px 20px;
+}
+
+.notice-title {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.notice-text {
+  padding: 16px 20px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--pass-label);
+}
+
+.notice-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 20px;
+}
+
+.notice-actions .link-button {
+  font-size: 13px;
+  text-decoration: none;
+}
+
+@media (max-width: 767px) {
+  .detail-title {
+    font-size: 20px;
+  }
+
+  .detail-pass-head {
+    padding: 14px 16px 18px;
+  }
+
+  .detail-pass .pass-fields {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    padding: 14px 16px 6px;
+  }
+
+  .detail-pass-note,
+  .detail-pass-question {
+    padding-inline: 16px;
+  }
+
+  .detail-pass .pass-links {
+    padding: 12px 16px 18px;
+  }
+
+  .attempt-picker,
+  .attempt-picker .select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .detail-buttons {
+    margin-left: 0;
+  }
+
+  .t-tool-body {
+    padding-left: 12px;
+  }
+
+  .jump-latest {
+    bottom: 16px;
+  }
 }

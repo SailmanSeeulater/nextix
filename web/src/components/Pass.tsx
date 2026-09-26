@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowUpRight, Clock, TriangleAlert } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Clock, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import { COLUMNS, headerField, liveness, passFields } from "@/lib/board";
 import type { TicketCard } from "@/lib/types";
@@ -83,6 +84,10 @@ export function Pass({
             ))}
           </dl>
           <div className="pass-links">
+            <Link href={`/tickets/${card.id}`} prefetch={false}>
+              Details
+              <ArrowRight size={14} strokeWidth={2.5} aria-hidden />
+            </Link>
             <a href={card.issue_url} target="_blank" rel="noreferrer">
               Issue #{card.issue_number}
               <ArrowUpRight size={14} strokeWidth={2.5} aria-hidden />

@@ -7,9 +7,13 @@ import {
   indexCards,
   formatAgo,
   headerField,
+  HEARTBEAT_RECHECK_MS,
+  HEARTBEAT_STALE_MS,
+  heartbeatNeedsRecheck,
   isHeartbeatStale,
   isStalled,
   liveness,
+  mergeHeartbeats,
   passFields,
   repoLabels,
   repoOptions,
@@ -107,6 +111,50 @@ describe("liveness helpers", () => {
     expect(formatElapsed("2026-09-25T10:01:00Z", now)).toBe("5s");
     expect(formatElapsed("2026-09-25T10:00:00Z", now)).toBe("1m 05s");
     expect(formatElapsed("2026-09-25T08:00:00Z", now)).toBe("2h 1m");
+  });
+
+  it("re-reads a live run's heartbeat before it would look lost", () => {
+    // 15s old: fresh enough. 25s old: re-read now, before the 30s alarm.
+    expect(heartbeatNeedsRecheck(run({ last_heartbeat: "2026-09-25T10:00:50Z" }), now)).toBe(false);
+    expect(heartbeatNeedsRecheck(run({ last_heartbeat: "2026-09-25T10:00:40Z" }), now)).toBe(true);
+    expect(heartbeatNeedsRecheck(run({ status: "claimed", last_heartbeat: null }), now)).toBe(true);
+    expect(HEARTBEAT_RECHECK_MS).toBeLessThan(HEARTBEAT_STALE_MS);
+  });
+
+  it("doesn't re-read runs that send no heartbeat", () => {
+    const old = "2026-09-25T09:00:00Z";
+    expect(heartbeatNeedsRecheck(null, now)).toBe(false);
+    expect(heartbeatNeedsRecheck(run({ status: "queued", last_heartbeat: null }), now)).toBe(false);
+    expect(heartbeatNeedsRecheck(run({ status: "failed", last_heartbeat: old }), now)).toBe(false);
+  });
+});
+
+describe("mergeHeartbeats", () => {
+  const doing = (overrides: Partial<RunSummary> = {}) =>
+    card({ column: "doing", latest_run: run(overrides) });
+
+  it("takes a newer heartbeat for the same run", () => {
+    const index = indexCards([doing({ last_heartbeat: "2026-09-25T10:00:00Z" })]);
+    const next = mergeHeartbeats(index, [doing({ last_heartbeat: "2026-09-25T10:00:20Z" })]);
+    expect(next.t1?.latest_run?.last_heartbeat).toBe("2026-09-25T10:00:20Z");
+    expect(index.t1?.latest_run?.last_heartbeat).toBe("2026-09-25T10:00:00Z"); // untouched
+  });
+
+  it("takes nothing else from the read, so a slow read can't undo a live move", () => {
+    const index = indexCards([card({ column: "in_review", latest_run: run({ status: "succeeded" }) })]);
+    const stale = doing({ status: "running", last_heartbeat: "2026-09-25T10:00:20Z" });
+    const next = mergeHeartbeats(index, [stale]);
+    expect(next.t1?.column).toBe("in_review");
+    expect(next.t1?.latest_run?.status).toBe("succeeded");
+  });
+
+  it("returns the same index when no heartbeat is newer, or the run changed", () => {
+    const index = indexCards([doing({ last_heartbeat: "2026-09-25T10:00:20Z" })]);
+    expect(mergeHeartbeats(index, [doing({ last_heartbeat: "2026-09-25T10:00:10Z" })])).toBe(index);
+    expect(mergeHeartbeats(index, [doing({ id: "r2", last_heartbeat: "2026-09-25T10:01:00Z" })])).toBe(
+      index,
+    );
+    expect(mergeHeartbeats(index, [card({ id: "other" })])).toBe(index);
   });
 });
 

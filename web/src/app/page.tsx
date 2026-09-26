@@ -23,6 +23,7 @@ export default async function BoardPage() {
         apiState={health === null ? "unreachable" : health.status}
         loadError={tickets === null}
         renderedAt={renderedAt}
+        claudeAuth={health?.claude ?? null}
       />
     </main>
   );

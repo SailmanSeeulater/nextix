@@ -6,20 +6,25 @@ import { flushSync } from "react-dom";
 import { logout } from "@/app/login/actions";
 import {
   COLUMNS,
+  HEARTBEAT_RECHECK_INTERVAL_MS,
   applyEvent,
   changesLayout,
   groupByColumn,
+  heartbeatNeedsRecheck,
   indexCards,
+  mergeHeartbeats,
   repoLabels,
   repoOptions,
   type CardIndex,
 } from "@/lib/board";
+import type { ClaudeAuth } from "@/lib/api";
 import { loadTickets } from "@/lib/client-api";
 import type { BoardEvent, Column, CreateTicketResult, RepoOption, TicketCard } from "@/lib/types";
 import { COLUMN_ICONS } from "./columnIcons";
 import { Composer } from "./Composer";
 import { Pass } from "./Pass";
 import { ThemePicker } from "./ThemePicker";
+import { useNow } from "./useNow";
 
 type Connection = "connecting" | "live" | "offline";
 type ApiState = "ok" | "error" | "unreachable";
@@ -56,6 +61,7 @@ export function Board({
   apiState,
   loadError,
   renderedAt,
+  claudeAuth,
 }: {
   initial: TicketCard[];
   /** null when the API couldn't be asked, as opposed to an empty list. */
@@ -64,6 +70,8 @@ export function Board({
   loadError: boolean;
   /** Server clock at render, so the first client render matches the HTML exactly. */
   renderedAt: number;
+  /** Which Claude credential triage uses, or null when the API couldn't say. */
+  claudeAuth: ClaudeAuth | null;
 }) {
   const [cards, setCards] = useState<CardIndex>(() => indexCards(initial));
   const [repo, setRepo] = useState("");
@@ -120,6 +128,18 @@ export function Board({
       source.close();
     };
   }, []);
+
+  // Heartbeats aren't pushed (only status and usage changes are), so re-read a live
+  // run's heartbeat before its pass would go hollow for an agent that is still alive.
+  const lastRecheck = useRef(0);
+  useEffect(() => {
+    if (now - lastRecheck.current < HEARTBEAT_RECHECK_INTERVAL_MS) return;
+    if (!Object.values(cards).some((c) => heartbeatNeedsRecheck(c.latest_run, now))) return;
+    lastRecheck.current = now;
+    void loadTickets().then((all) => {
+      if (all) setCards((c) => mergeHeartbeats(c, all));
+    });
+  }, [cards, now]);
 
   const onCreated = useCallback((result: CreateTicketResult) => {
     const card = result.ticket;
@@ -188,6 +208,7 @@ export function Board({
         repos={repos}
         preferredRepo={repo}
         morphRef={morphRef}
+        claudeAuth={claudeAuth}
         onCreated={onCreated}
       />
 
@@ -313,13 +334,4 @@ function ConnectionSignal({ state, apiState }: { state: Connection; apiState: Ap
       </span>
     </span>
   );
-}
-
-function useNow(initial: number, intervalMs: number): number {
-  const [now, setNow] = useState(initial);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
 }

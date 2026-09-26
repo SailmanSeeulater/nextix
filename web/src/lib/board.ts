@@ -101,6 +101,42 @@ export function isHeartbeatStale(run: RunSummary, now: number): boolean {
   return now - Date.parse(run.last_heartbeat) > HEARTBEAT_STALE_MS;
 }
 
+/**
+ * Heartbeats reach the database at least every 15 s, but nothing pushes them to the
+ * browser (docs/phase3.md: a heartbeat updates `last_heartbeat` only; streams carry
+ * status changes and usage). So once a live run's last known heartbeat is this old, the
+ * page re-reads it, well before it would show as lost at HEARTBEAT_STALE_MS.
+ */
+export const HEARTBEAT_RECHECK_MS = 20_000;
+/** At most one heartbeat re-read per this interval, even while a run stays quiet. */
+export const HEARTBEAT_RECHECK_INTERVAL_MS = 10_000;
+
+/** True when a claimed or running run's heartbeat is old enough to re-read. */
+export function heartbeatNeedsRecheck(run: RunSummary | null, now: number): boolean {
+  if (!run || (run.status !== "claimed" && run.status !== "running")) return false;
+  if (!run.last_heartbeat) return true;
+  return now - Date.parse(run.last_heartbeat) > HEARTBEAT_RECHECK_MS;
+}
+
+/**
+ * Take newer heartbeats from a fresh read of the board, and nothing else: moves between
+ * stacks keep arriving as events, so a slow read can't undo one. Returns `index` itself
+ * when no heartbeat is newer.
+ */
+export function mergeHeartbeats(index: CardIndex, fresh: readonly TicketCard[]): CardIndex {
+  let next: CardIndex | null = null;
+  for (const card of fresh) {
+    const current = index[card.id];
+    const run = current?.latest_run;
+    const beat = card.latest_run?.last_heartbeat;
+    if (!current || !run || !beat || card.latest_run?.id !== run.id) continue;
+    if (run.last_heartbeat && Date.parse(run.last_heartbeat) >= Date.parse(beat)) continue;
+    next ??= { ...index };
+    next[card.id] = { ...current, latest_run: { ...run, last_heartbeat: beat } };
+  }
+  return next ?? index;
+}
+
 export function formatElapsed(fromIso: string, now: number): string {
   const s = Math.max(0, Math.floor((now - Date.parse(fromIso)) / 1000));
   const h = Math.floor(s / 3600);

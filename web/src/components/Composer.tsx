@@ -3,6 +3,7 @@
 import { ArrowUpRight, LoaderCircle } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type RefObject, useId, useRef, useState } from "react";
 import { ApiError, createTicket, parseLabels } from "@/lib/client-api";
+import type { ClaudeAuth } from "@/lib/api";
 import type { CreateTicketResult, RepoOption } from "@/lib/types";
 
 type Note =
@@ -18,22 +19,28 @@ export function Composer({
   repos,
   preferredRepo,
   morphRef,
+  claudeAuth,
   onCreated,
 }: {
   /** null when the repository list couldn't be loaded (API down), [] when none are connected. */
   repos: RepoOption[] | null;
   preferredRepo: string;
+  /** Which Claude credential triage uses; null when unknown (API unreachable). */
+  claudeAuth: ClaudeAuth | null;
   morphRef: RefObject<HTMLDivElement | null>;
   onCreated: (result: CreateTicketResult) => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [labels, setLabels] = useState("");
-  const [triage, setTriage] = useState(true);
+  const [triageChoice, setTriage] = useState(true);
+  // With no Claude credential on the server, filing still works, just without triage.
+  const claudeOff = claudeAuth === "none";
+  const triage = triageChoice && !claudeOff;
   const [chosenRepo, setChosenRepo] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const ids = { prompt: useId(), repo: useId(), labels: useId() };
+  const ids = { prompt: useId(), repo: useId(), labels: useId(), claude: useId() };
 
   const repoNames = (repos ?? []).map((r) => r.full_name);
   const repo =
@@ -156,9 +163,15 @@ export function Composer({
             role="switch"
             checked={triage}
             onChange={(e) => setTriage(e.target.checked)}
-            disabled={blocked || busy}
+            disabled={blocked || busy || claudeOff}
+            aria-describedby={claudeOff ? ids.claude : undefined}
           />
           Write it up with Claude
+          {claudeAuth === "subscription" || claudeAuth === "api_key" ? (
+            <span className="switch-meta">
+              {claudeAuth === "subscription" ? "on your plan" : "API key"}
+            </span>
+          ) : null}
         </label>
         <button
           type="submit"
@@ -213,6 +226,13 @@ export function Composer({
           <p className="composer-note">Claude is turning this into an issue. This can take a minute.</p>
         ) : null}
       </div>
+      {claudeOff && !blocked ? (
+        <p className="composer-note" id={ids.claude}>
+          Claude isn&apos;t set up on the server, so tickets are filed exactly as you write
+          them. Add CLAUDE_CODE_OAUTH_TOKEN (your Claude plan) or ANTHROPIC_API_KEY to .env
+          and restart to have Claude write them up.
+        </p>
+      ) : null}
     </form>
   );
 }
