@@ -64,6 +64,7 @@ def run_detail(run: Run) -> dict[str, Any]:
         "tests": run.tests,
         "review_errors": run.review_errors or [],
         "review": run.review_meta,
+        "model": run.model,
     }
 
 

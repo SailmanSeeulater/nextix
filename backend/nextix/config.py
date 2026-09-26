@@ -53,10 +53,33 @@ class Settings(BaseSettings):
     agent_mem_limit: str = "4g"
     agent_cpus: float = 2.0
     agent_pids_limit: int = 512
+    # Scale (Phase 6). Runs active at once per repository, so agents never race on a repo.
+    nextix_max_runs_per_repo: int = Field(default=1, ge=1, le=20)
+    # Agent model by ticket label, first match wins, e.g.
+    # "nextix:small=claude-haiku-4-5,nextix:large=claude-opus-5-5". Else anthropic_model.
+    nextix_model_routes: str = ""
     artifact_dir: Path = Path("/data/artifacts")
 
     # CORS origins for the web app. Comma-separated.
     cors_origins: str = Field(default="http://localhost:3000")
+
+    @property
+    def model_routes(self) -> list[tuple[str, str]]:
+        """(label, model) pairs from NEXTIX_MODEL_ROUTES, in order; malformed parts ignored."""
+        routes = []
+        for part in self.nextix_model_routes.split(","):
+            label, sep, model = part.partition("=")
+            if sep and label.strip() and model.strip():
+                routes.append((label.strip(), model.strip()))
+        return routes
+
+    def model_for(self, labels: list[str]) -> str:
+        """The agent model for a ticket with these labels."""
+        present = {label.lower() for label in labels}
+        for label, model in self.model_routes:
+            if label.lower() in present:
+                return model
+        return self.anthropic_model
 
     @property
     def allowed_github_users(self) -> frozenset[str]:

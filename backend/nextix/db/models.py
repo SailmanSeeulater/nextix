@@ -129,6 +129,7 @@ class Run(Base):
     review_errors: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     review_id: Mapped[int | None] = mapped_column(BigInteger)
     review_meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    model: Mapped[str | None] = mapped_column(Text)
 
     ticket: Mapped[Ticket] = relationship(back_populates="runs")
     events: Mapped[list["RunEvent"]] = relationship(back_populates="run", order_by="RunEvent.id")

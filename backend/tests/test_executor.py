@@ -56,6 +56,7 @@ class FakeSandbox:
         self.removed: list[str] = []
         self.killed_runs: list[uuid.UUID] = []
         self.labelled: set[uuid.UUID] = set()
+        self.owners: dict[uuid.UUID, str] = {}
         self.on_start: Callable[[], object] | None = None
         self.tree: dict[str, bytes] | None = None  # the artifacts directory
 
@@ -95,8 +96,8 @@ class FakeSandbox:
         self.killed_runs.append(run_id)
         return True
 
-    def labelled_runs(self) -> set[uuid.UUID]:
-        return set(self.labelled)
+    def labelled_runs(self) -> dict[uuid.UUID, str]:
+        return {run_id: self.owners.get(run_id, "") for run_id in self.labelled}
 
 
 class FakePusher:
@@ -944,3 +945,97 @@ async def test_artifacts_tests_and_screenshots_reach_the_pr(
     assert "❌ Tests failed: `npm test` (exit 1, 12 s)" in body
     assert "| `/` | 1.51% of pixels |" in body
     assert "❌ Tests failed" in comments(github)[-1]
+
+
+# ------------------------------------------------------------------ phase 6: scale
+
+
+async def test_the_sweep_leaves_a_live_sibling_sandbox_alone(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+) -> None:
+    from nextix.runs.executor import sandbox_owner
+
+    mine = await queued_run(session, status="running")
+    stale = Run(ticket_id=(await another_ticket(session, mine, 8)).id, attempt=1, status="running")
+    session.add(stale)
+    await session.commit()
+    sandbox = FakeSandbox()
+    sandbox.labelled = {mine.id, stale.id}
+    sandbox.owners = {mine.id: sandbox_owner(), stale.id: "0ldb00t:4242"}
+
+    removed = await sweep_orphans(session, ctx(session_factory, gh, publisher, sandbox))
+    assert removed == {stale.id}
+    assert sandbox.killed_runs == [stale.id]
+
+
+def test_owner_liveness() -> None:
+    import os
+
+    from nextix.runs.executor import WORKER_BOOT_ID, owner_is_alive, sandbox_owner
+
+    assert owner_is_alive(sandbox_owner())
+    assert not owner_is_alive(f"another-boot:{os.getpid()}")
+    assert not owner_is_alive(f"{WORKER_BOOT_ID}:999999999")
+    assert not owner_is_alive("")
+
+
+async def test_a_busy_repository_keeps_the_run_queued(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+) -> None:
+    from nextix.runs.executor import RepoBusy
+
+    busy = await queued_run(session, status="running")
+    waiting = Run(ticket_id=(await another_ticket(session, busy, 8)).id, attempt=1, status="queued")
+    session.add(waiting)
+    await session.commit()
+    sandbox = FakeSandbox(SUCCESS)
+
+    with pytest.raises(RepoBusy):
+        await execute_run(waiting.id, ctx(session_factory, gh, publisher, sandbox))
+    await session.refresh(waiting)
+    assert waiting.status == "queued" and sandbox.specs == []
+
+    # Two slots per repo: now it may start.
+    await execute_run(
+        waiting.id,
+        ctx(session_factory, gh, publisher, sandbox, nextix_max_runs_per_repo=2),
+    )
+    await session.refresh(waiting)
+    assert waiting.status == "succeeded"
+
+
+async def test_labels_route_the_run_to_a_model(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+) -> None:
+    run = await queued_run(session)
+    ticket = await session.get(Ticket, run.ticket_id)
+    assert ticket is not None
+    ticket.labels = ["nextix", "nextix:small"]
+    await session.commit()
+    sandbox = FakeSandbox(SUCCESS)
+    routes = "nextix:large=claude-opus-5-5,nextix:small=claude-haiku-4-5"
+    await execute_run(
+        run.id, ctx(session_factory, gh, publisher, sandbox, nextix_model_routes=routes)
+    )
+    assert sandbox.specs[0].env["NEXTIX_MODEL"] == "claude-haiku-4-5"
+    run, _ = await reload(session, run)
+    assert run.model == "claude-haiku-4-5"
+
+
+def test_model_routes_are_parsed_leniently() -> None:
+    config = settings(nextix_model_routes=" nextix:small = haiku ,broken, =x, big=opus ")
+    assert config.model_routes == [("nextix:small", "haiku"), ("big", "opus")]
+    assert config.model_for(["BIG"]) == "opus"
+    assert config.model_for(["other"]) == config.anthropic_model

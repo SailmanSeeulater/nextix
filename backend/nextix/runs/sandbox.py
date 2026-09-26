@@ -16,6 +16,8 @@ from typing import Protocol
 log = logging.getLogger(__name__)
 
 RUN_LABEL = "nextix.run_id"
+# "<worker boot id>:<pid>" of the worker process watching the sandbox (see executor).
+OWNER_LABEL = "nextix.owner"
 OUT_DIR = "/work/.nextix-out"
 RESULT_PATH = f"{OUT_DIR}/result.json"
 BUNDLE_PATH = f"{OUT_DIR}/branch.bundle"
@@ -30,6 +32,7 @@ class SandboxSpec:
     run_id: uuid.UUID
     image: str
     env: dict[str, str] = field(repr=False)  # holds credentials: never printed
+    owner: str = ""
     network: str | None = None
     mem_limit: str = "4g"
     nano_cpus: int = 2_000_000_000
@@ -62,8 +65,8 @@ class Sandbox(Protocol):
         """Kill and remove any container labelled with this run; True if one existed."""
         ...
 
-    def labelled_runs(self) -> set[uuid.UUID]:
-        """Run ids of every sandbox container that still exists, running or not."""
+    def labelled_runs(self) -> dict[uuid.UUID, str]:
+        """Every sandbox container that still exists, running or not: run id -> owner."""
         ...
 
 
@@ -81,7 +84,7 @@ class DockerSandbox:
             name=container_name(spec.run_id),
             init=True,  # reap processes the agent leaves behind; the runner isn't PID 1
             environment=spec.env,
-            labels={RUN_LABEL: str(spec.run_id)},
+            labels={RUN_LABEL: str(spec.run_id), OWNER_LABEL: spec.owner},
             network=spec.network,
             user="1000:1000",
             cap_drop=["ALL"],
@@ -190,9 +193,11 @@ class DockerSandbox:
             self.remove(str(container.id))
         return bool(found)
 
-    def labelled_runs(self) -> set[uuid.UUID]:
-        found: set[uuid.UUID] = set()
+    def labelled_runs(self) -> dict[uuid.UUID, str]:
+        found: dict[uuid.UUID, str] = {}
         for container in self._docker.containers.list(all=True, filters={"label": RUN_LABEL}):
             with contextlib.suppress(ValueError, TypeError):
-                found.add(uuid.UUID(container.labels.get(RUN_LABEL)))
+                found[uuid.UUID(container.labels.get(RUN_LABEL))] = container.labels.get(
+                    OWNER_LABEL, ""
+                )
         return found

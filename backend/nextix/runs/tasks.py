@@ -16,6 +16,7 @@ from pathlib import Path
 
 import httpx
 import redis.asyncio as aioredis
+from celery import Task
 from celery.signals import worker_ready
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -26,7 +27,7 @@ from nextix.config import get_settings
 from nextix.events.stream import RedisPublisher
 from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.client import GitHubClient
-from nextix.runs.executor import WorkerContext, execute_run, sweep_orphans
+from nextix.runs.executor import RepoBusy, WorkerContext, execute_run, sweep_orphans
 from nextix.runs.push import GitBundlePusher
 from nextix.runs.reaper import reap
 from nextix.runs.sandbox import DockerSandbox, Sandbox
@@ -110,9 +111,17 @@ def sweep_sandboxes_on_start(**_: object) -> None:
         log.exception("could not sweep leftover sandboxes on start")
 
 
-@celery_app.task(name="nextix.execute_run")
-def execute_run_task(run_id: str) -> None:
-    asyncio.run(_execute(uuid.UUID(run_id)))
+# How long a run whose repository is busy waits before the worker looks again.
+REPO_BUSY_RETRY_S = 20
+
+
+@celery_app.task(name="nextix.execute_run", bind=True, max_retries=None)
+def execute_run_task(self: Task, run_id: str) -> None:  # type: ignore[type-arg]
+    try:
+        asyncio.run(_execute(uuid.UUID(run_id)))
+    except RepoBusy:
+        # The run stays queued ("Waiting for a worker" on the board) until a slot frees.
+        raise self.retry(countdown=REPO_BUSY_RETRY_S) from None
 
 
 @celery_app.task(name="nextix.reap_runs", ignore_result=True)

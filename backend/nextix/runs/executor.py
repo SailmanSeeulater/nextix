@@ -10,16 +10,18 @@ pusher, the publisher), so the whole flow is testable with fakes.
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nextix.claude_auth import ClaudeAuth, resolve
@@ -89,6 +91,34 @@ def clean_tests(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+# Identifies this worker process tree: generated once when the module is imported by
+# the Celery main process, and inherited by its forked children. A restarted worker gets
+# a new one, so sandboxes owned by the previous boot are recognisably orphaned.
+WORKER_BOOT_ID = uuid.uuid4().hex[:12]
+
+
+def sandbox_owner() -> str:
+    return f"{WORKER_BOOT_ID}:{os.getpid()}"
+
+
+def owner_is_alive(owner: str) -> bool:
+    """True while the process that started a sandbox (this worker boot) is still running."""
+    boot, _, pid = owner.partition(":")
+    if boot != WORKER_BOOT_ID or not pid.isdigit():
+        return False
+    if os.name != "posix":
+        # Workers run in Linux containers; elsewhere (tests on Windows) signal 0 means
+        # Ctrl+C, so only this very process counts as alive.
+        return int(pid) == os.getpid()
+    try:
+        os.kill(int(pid), 0)  # signal 0: existence check only
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 @dataclass
 class WorkerContext:
     sessions: async_sessionmaker[AsyncSession]
@@ -99,6 +129,8 @@ class WorkerContext:
     settings: Settings
     # Queues follow-up runs (a review that arrived mid-run); None in tests that don't care.
     enqueue: RunEnqueuer | None = None
+    # Whether the worker process named in a sandbox's owner label is still watching it.
+    owner_alive: Callable[[str], bool] = owner_is_alive
     poll_interval_s: float = 2.0
     grace_s: float = 120.0
 
@@ -157,7 +189,7 @@ def sandbox_env(
         "NEXTIX_ISSUE_NUMBER": str(ticket.issue_number),
         # Unescaped UTF-8: a single environment variable must stay under Linux's 128 KiB.
         "NEXTIX_TASK_JSON": task_json,
-        "NEXTIX_MODEL": settings.anthropic_model,
+        "NEXTIX_MODEL": run.model or settings.model_for(list(ticket.labels)),
         "NEXTIX_MAX_TURNS": str(limits.max_turns),
         "NEXTIX_TIMEOUT_MIN": str(limits.timeout_min),
         "NEXTIX_MAX_COST_USD": str(limits.max_cost_usd),
@@ -355,14 +387,38 @@ async def _load(session: AsyncSession, run_id: uuid.UUID) -> tuple[Run, Ticket, 
     return run, ticket, repo
 
 
+class RepoBusy(Exception):
+    """The run's repository already has NEXTIX_MAX_RUNS_PER_REPO active runs; try later."""
+
+
 async def _claim(session: AsyncSession, run_id: uuid.UUID, ctx: WorkerContext) -> Run | None:
-    """queued → claimed, atomically. None if someone else has it or it's no longer queued."""
+    """queued → claimed, atomically. None if someone else has it or it's no longer queued.
+
+    Raises RepoBusy (the run stays queued) when its repository is at its run limit.
+    """
     run = await session.scalar(
         select(Run).where(Run.id == run_id).with_for_update(skip_locked=True)
     )
     if run is None or run.status != RunStatus.QUEUED:
         await session.rollback()
         return None
+    repo_id = await session.scalar(select(Ticket.repo_id).where(Ticket.id == run.ticket_id))
+    # Serialise claims per repository, so two workers can't both take its last slot.
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"nextix-repo:{repo_id}"}
+    )
+    active = await session.scalar(
+        select(func.count())
+        .select_from(Run)
+        .join(Ticket, Ticket.id == Run.ticket_id)
+        .where(
+            Ticket.repo_id == repo_id,
+            Run.status.in_((RunStatus.CLAIMED, RunStatus.RUNNING)),
+        )
+    )
+    if (active or 0) >= ctx.settings.nextix_max_runs_per_repo:
+        await session.rollback()
+        raise RepoBusy(str(repo_id))
     run.agent_id = f"agent-{secrets.token_hex(3)}"
     run.callback_secret = secrets.token_hex(32)
     await record_transition(session, run, RunStatus.CLAIMED, gh=ctx.gh, publisher=ctx.publisher)
@@ -477,14 +533,19 @@ def _parse_result(raw: bytes | None) -> RunResult | None:
 
 
 async def sweep_orphans(session: AsyncSession, ctx: WorkerContext) -> set[uuid.UUID]:
-    """Remove every sandbox left from before this run, e.g. after the runner restarted.
+    """Remove sandboxes nobody is watching any more, e.g. after the runner restarted.
 
-    There is one runner and it runs one agent at a time, so a sandbox that exists when a
-    run starts has nobody watching it: its result would never be collected. It is removed,
-    and its run, if still active, fails with `worker_restarted` so it can be retried.
-    (With several runners this would need per-worker ownership; that's Phase 6.)
+    Each sandbox is labelled with the worker process that started it. A sandbox whose
+    owner is gone (a previous worker boot, or a process that died) would never have its
+    result collected: it is removed, and its run, if still active, fails with
+    `worker_restarted` so it can be retried. Sandboxes of live sibling processes (with
+    RUNNER_CONCURRENCY above 1) are left alone.
     """
-    labelled = await asyncio.to_thread(ctx.sandbox.labelled_runs)
+    labelled = {
+        run_id: owner
+        for run_id, owner in (await asyncio.to_thread(ctx.sandbox.labelled_runs)).items()
+        if not ctx.owner_alive(owner)
+    }
     for run_id in labelled:
         log.warning("removing the unsupervised sandbox of run %s", run_id)
         await asyncio.to_thread(ctx.sandbox.kill_run, run_id)
@@ -510,7 +571,7 @@ async def sweep_orphans(session: AsyncSession, ctx: WorkerContext) -> set[uuid.U
             publisher=ctx.publisher,
             exit_reason="worker_restarted",
         )
-    return labelled
+    return set(labelled)
 
 
 async def _has_base_branch(repo: Repo, ctx: WorkerContext) -> bool:
@@ -580,6 +641,8 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
             )
             return
         limits = RunLimits.resolve(ctx.settings, repo_config.config)
+        run.model = ctx.settings.model_for(list(ticket.labels))
+        await session.commit()
 
         container_id: str | None = None
         keep_alive: asyncio.Task[None] | None = None
@@ -607,6 +670,7 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                     limits=limits,
                     review_comments=review_comments,
                 ),
+                owner=sandbox_owner(),
                 network=ctx.settings.agent_network or None,
                 mem_limit=ctx.settings.agent_mem_limit,
                 nano_cpus=int(ctx.settings.agent_cpus * 1_000_000_000),

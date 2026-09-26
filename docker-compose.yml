@@ -71,13 +71,14 @@ services:
       api:
         condition: service_healthy
 
-  # Agent runs, one at a time. This is the only service with the Docker socket: it starts
+  # Agent runs, RUNNER_CONCURRENCY at a time (default 1). This is the only service with
+  # the Docker socket: it starts
   # and stops the sandboxes. The socket is root-owned, so this worker runs as root; the
   # sandboxes it starts run as uid 1000 with no capabilities and no socket.
   runner:
     build: ./backend
     <<: *backend-env
-    command: celery -A nextix.celery_app worker --loglevel=info --queues=runs --concurrency=1 --hostname=runner@%h
+    command: celery -A nextix.celery_app worker --loglevel=info --queues=runs --concurrency=${RUNNER_CONCURRENCY:-1} --hostname=runner@%h
     user: root
     volumes:
       - ./backend:/app
