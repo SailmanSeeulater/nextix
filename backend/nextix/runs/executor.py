@@ -24,10 +24,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nextix.claude_auth import ClaudeAuth, resolve
 from nextix.config import Settings
-from nextix.db.models import Repo, Run, Ticket
+from nextix.db.models import Artifact, Repo, Run, Ticket
 from nextix.events.stream import EventPublisher, publish_ticket_changes
 from nextix.github.client import GitHubClient
 from nextix.redact import redact
+from nextix.runs.artifacts import MAX_TOTAL_BYTES as MAX_ARTIFACT_BYTES
+from nextix.runs.artifacts import SANDBOX_DIR as ARTIFACTS_SANDBOX_DIR
+from nextix.runs.artifacts import collect as collect_artifacts
+from nextix.runs.config import (
+    CONFIG_PATH,
+    ConfigError,
+    NextixConfig,
+    RunLimits,
+    load_repo_config,
+)
 from nextix.runs.lifecycle import record_transition
 from nextix.runs.push import BranchPusher, PushError
 from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, Sandbox, SandboxSpec
@@ -56,6 +66,27 @@ class RunResult(BaseModel):
     output_tokens: int = 0
     cost_usd: float = 0.0
     num_turns: int = 0
+    tests: dict[str, Any] | None = None
+
+
+def clean_tests(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """result.json's `tests`, reduced to the documented fields with the right types."""
+    if not isinstance(raw, dict):
+        return None
+    command, exit_code = raw.get("command"), raw.get("exit_code")
+    passed, duration = raw.get("passed"), raw.get("duration_s")
+    if not isinstance(command, str) or not isinstance(passed, bool):
+        return None
+    return {
+        "command": redact(command)[:1000],
+        "exit_code": exit_code
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool)
+        else None,
+        "passed": passed,
+        "duration_s": float(duration)
+        if isinstance(duration, int | float) and not isinstance(duration, bool)
+        else None,
+    }
 
 
 @dataclass
@@ -88,8 +119,10 @@ def sandbox_env(
     repo: Repo,
     clone_token: str,
     clarification: str = "",
+    config: NextixConfig | None = None,
+    limits: RunLimits | None = None,
 ) -> dict[str, str]:
-    """The complete environment contract from docs/phase3.md. Nothing else is passed.
+    """The complete environment contract (docs/phase3.md and phase4.md). Nothing else is passed.
 
     The task is the run's snapshot (what the trusted person approved), not the live issue.
     """
@@ -100,10 +133,12 @@ def sandbox_env(
     if clarification:
         clarification = clarification[:MAX_CLARIFICATION_CHARS]
         body = f"{body}\n\n{clarification}" if body else clarification
+    config = config or NextixConfig()
+    limits = limits or RunLimits.resolve(settings, config)
     task = {
         "title": title,
         "body": body,
-        "extra_instructions": "",  # from .nextix.yml in Phase 4
+        "extra_instructions": config.agent.extra_instructions or "",
         "review_comments": [],  # from PR reviews in Phase 5
     }
     return {
@@ -119,16 +154,46 @@ def sandbox_env(
         # Unescaped UTF-8: a single environment variable must stay under Linux's 128 KiB.
         "NEXTIX_TASK_JSON": json.dumps(task, ensure_ascii=False),
         "NEXTIX_MODEL": settings.anthropic_model,
-        "NEXTIX_MAX_TURNS": str(settings.agent_max_turns),
-        "NEXTIX_TIMEOUT_MIN": str(settings.agent_default_timeout_min),
-        "NEXTIX_MAX_COST_USD": str(settings.agent_default_max_cost_usd),
-        "NEXTIX_ALLOWED_TOOLS": settings.agent_allowed_tools,
+        "NEXTIX_MAX_TURNS": str(limits.max_turns),
+        "NEXTIX_TIMEOUT_MIN": str(limits.timeout_min),
+        "NEXTIX_MAX_COST_USD": str(limits.max_cost_usd),
+        "NEXTIX_ALLOWED_TOOLS": limits.allowed_tools,
+        "NEXTIX_CONFIG_JSON": json.dumps(config.sandbox_json(), ensure_ascii=False),
         "GITHUB_TOKEN": clone_token,
         **claude_credential_env(settings),
     }
 
 
-def pr_body(*, settings: Settings, run: Run, ticket: Ticket, result: RunResult) -> str:
+def tests_line(tests: dict[str, Any] | None) -> str | None:
+    if not tests:
+        return None
+    took = f", {tests['duration_s']:.0f} s" if tests.get("duration_s") is not None else ""
+    if tests["passed"]:
+        return f"✅ Tests passed: `{tests['command']}`{took}"
+    code = f"exit {tests['exit_code']}" if tests.get("exit_code") is not None else "failed"
+    return f"❌ Tests failed: `{tests['command']}` ({code}{took})"
+
+
+def screenshots_table(shots: list[Artifact]) -> str | None:
+    diffs = [a for a in shots if a.kind == "screenshot_diff"]
+    if not diffs:
+        return None
+    rows = []
+    for diff in sorted(diffs, key=lambda a: a.label or ""):
+        pct = (diff.meta or {}).get("diff_pct")
+        change = "no visible change" if pct == 0 else f"{pct:.2f}% of pixels" if pct else "?"
+        rows.append(f"| `{diff.label}` | {change} |")
+    return "| Route | Changed |\n|---|---|\n" + "\n".join(rows)
+
+
+def pr_body(
+    *,
+    settings: Settings,
+    run: Run,
+    ticket: Ticket,
+    result: RunResult,
+    shots: list[Artifact] | None = None,
+) -> str:
     link = f"{settings.nextix_public_url.rstrip('/')}/tickets/{ticket.id}"
     duration = ""
     if run.started_at:
@@ -136,10 +201,15 @@ def pr_body(*, settings: Settings, run: Run, ticket: Ticket, result: RunResult) 
         duration = f" · {seconds // 60}m {seconds % 60:02d}s"
     summary = redact(result.summary.strip()) or "_The agent did not leave a summary._"
     tokens = result.input_tokens + result.output_tokens
+    review = [
+        line for line in (tests_line(run.tests), screenshots_table(shots or [])) if line is not None
+    ]
+    checks = ("\n\n".join(review) + "\n\n") if review else ""
     return (
         f"{summary}\n\n"
         f"Closes #{ticket.issue_number}\n\n"
-        f"[Agent transcript on the nexTix board]({link})\n\n"
+        f"{checks}"
+        f"[Agent transcript, screenshots and tests on the nexTix board]({link})\n\n"
         "---\n"
         f"<sub>🤖 nexTix · {run.agent_id} · attempt {run.attempt} · "
         f"${result.cost_usd:.2f} · {tokens:,} tokens{duration}</sub>\n"
@@ -259,9 +329,11 @@ async def _finish(
     )
 
 
-async def _wait(session: AsyncSession, run: Run, container_id: str, ctx: WorkerContext) -> str:
+async def _wait(
+    session: AsyncSession, run: Run, container_id: str, ctx: WorkerContext, timeout_min: int
+) -> str:
     """Wait for the sandbox. Returns 'exited', 'timeout', or 'stopped' (cancel/reaper)."""
-    deadline = time.monotonic() + ctx.settings.agent_default_timeout_min * 60 + ctx.grace_s
+    deadline = time.monotonic() + timeout_min * 60 + ctx.grace_s
     while True:
         if not await asyncio.to_thread(ctx.sandbox.is_running, container_id):
             return "exited"
@@ -274,6 +346,23 @@ async def _wait(session: AsyncSession, run: Run, container_id: str, ctx: WorkerC
             await asyncio.to_thread(ctx.sandbox.kill, container_id)
             return "timeout"
         await asyncio.sleep(ctx.poll_interval_s)
+
+
+# Tar overhead on top of the artifact caps.
+ARTIFACT_ARCHIVE_SLACK = 4 * 1024 * 1024
+
+
+async def _read_artifacts(ctx: WorkerContext, container_id: str) -> dict[str, bytes] | None:
+    try:
+        return await asyncio.to_thread(
+            ctx.sandbox.read_tree,
+            container_id,
+            ARTIFACTS_SANDBOX_DIR,
+            max_bytes=MAX_ARTIFACT_BYTES + ARTIFACT_ARCHIVE_SLACK,
+        )
+    except Exception:
+        log.exception("could not copy the artifacts out of %s", container_id[:12])
+        return None
 
 
 KEEP_ALIVE_INTERVAL_S = 20.0
@@ -400,8 +489,27 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
             )
             return
 
+        try:
+            repo_config = await load_repo_config(session, ctx.gh, repo)
+        except ConfigError as exc:
+            await _finish(
+                session,
+                run,
+                RunStatus.FAILED,
+                ctx,
+                exit_reason="bad_config",
+                comment=(
+                    f"❌ Failed: `{CONFIG_PATH}` on `{repo.default_branch}` can't be used:"
+                    f"\n\n```\n{redact(str(exc))}\n```\n\nFix it on `{repo.default_branch}`, "
+                    "then retry."
+                ),
+            )
+            return
+        limits = RunLimits.resolve(ctx.settings, repo_config.config)
+
         container_id: str | None = None
         keep_alive: asyncio.Task[None] | None = None
+        files: dict[str, bytes] | None = None
         outcome = "exited"
         result: RunResult | None = None
         bundle: bytes | None = None
@@ -420,6 +528,8 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                     repo=repo,
                     clone_token=clone_token,
                     clarification=clarification,
+                    config=repo_config.config,
+                    limits=limits,
                 ),
                 network=ctx.settings.agent_network or None,
                 mem_limit=ctx.settings.agent_mem_limit,
@@ -429,13 +539,14 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
             container_id = await asyncio.to_thread(ctx.sandbox.start, spec)
             run.container_id = container_id
             await session.commit()
-            outcome = await _wait(session, run, container_id, ctx)
+            outcome = await _wait(session, run, container_id, ctx, limits.timeout_min)
             keep_alive = asyncio.create_task(_keep_alive(ctx, run.id))
             result = _parse_result(
                 await asyncio.to_thread(ctx.sandbox.read_file, container_id, RESULT_PATH)
             )
             if result and result.commits > 0:
                 bundle = await asyncio.to_thread(ctx.sandbox.read_file, container_id, BUNDLE_PATH)
+            files = await _read_artifacts(ctx, container_id)
         except Exception as exc:
             log.exception("sandbox for run %s failed", run_id)
             await _finish(
@@ -455,8 +566,21 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
 
         try:
             await _record_usage(session, run, result)
+            collected = await collect_artifacts(session, run, files, ctx.settings.artifact_dir)
+            if collected.errors:
+                run.review_errors = collected.errors
+                await session.commit()
             await _conclude(
-                session, run, ticket, repo, ctx, outcome=outcome, result=result, bundle=bundle
+                session,
+                run,
+                ticket,
+                repo,
+                ctx,
+                outcome=outcome,
+                result=result,
+                bundle=bundle,
+                limits=limits,
+                shots=collected.artifacts,
             )
         finally:
             if keep_alive:
@@ -471,6 +595,7 @@ async def _record_usage(session: AsyncSession, run: Run, result: RunResult | Non
     run.output_tokens = max(run.output_tokens, result.output_tokens)
     run.cost_usd = max(run.cost_usd, Decimal(str(round(result.cost_usd, 4))))
     run.summary = redact(result.summary)[:4000] or None
+    run.tests = clean_tests(result.tests)
     await session.commit()
 
 
@@ -484,13 +609,15 @@ async def _conclude(
     outcome: str,
     result: RunResult | None,
     bundle: bytes | None,
+    limits: RunLimits,
+    shots: list[Artifact],
 ) -> None:
     await session.refresh(run)
     if run.status in TERMINAL_STATUSES:
         return  # the owner cancelled, or the reaper already failed it and commented
     if result is None:
         if outcome == "timeout":
-            minutes = ctx.settings.agent_default_timeout_min
+            minutes = limits.timeout_min
             await _finish(
                 session,
                 run,
@@ -536,7 +663,7 @@ async def _conclude(
         if not await _still_active(session, run):
             log.info("run %s ended after its push; no pull request opened", run.id)
             return
-        pr, created = await _open_or_update_pr(run, ticket, repo, ctx, result)
+        pr, created = await _open_or_update_pr(run, ticket, repo, ctx, result, shots)
     except (PushError, Exception) as exc:
         log.exception("publishing run %s failed", run.id)
         await _finish(
@@ -552,6 +679,7 @@ async def _conclude(
     ticket = await session.get(Ticket, ticket.id, populate_existing=True) or ticket
     ticket.pr_number = pr["number"]
     ticket.pr_state = "open"
+    ticket.pr_head_sha = pr["head_sha"] or ticket.pr_head_sha
     ticket.updated_at = datetime.now(UTC)
     await session.commit()
     verb = "Opened" if created else "Updated"
@@ -563,15 +691,21 @@ async def _conclude(
         comment=(
             f"✅ {verb} PR #{pr['number']} from `{run.branch}` "
             f"(${result.cost_usd:.2f}, {result.num_turns} turns)."
+            + (f"\n\n{line}" if (line := tests_line(run.tests)) else "")
         ),
     )
 
 
 async def _open_or_update_pr(
-    run: Run, ticket: Ticket, repo: Repo, ctx: WorkerContext, result: RunResult
+    run: Run,
+    ticket: Ticket,
+    repo: Repo,
+    ctx: WorkerContext,
+    result: RunResult,
+    shots: list[Artifact],
 ) -> tuple[dict[str, Any], bool]:
     title = f"[nextix #{ticket.issue_number}] {ticket.title}"
-    body = pr_body(settings=ctx.settings, run=run, ticket=ticket, result=result)
+    body = pr_body(settings=ctx.settings, run=run, ticket=ticket, result=result, shots=shots)
     existing = await ctx.gh.find_open_pull(
         repo.installation_id, repo.owner, repo.name, branch=run.branch or ""
     )
@@ -579,7 +713,7 @@ async def _open_or_update_pr(
         pr = await ctx.gh.update_pull(
             repo.installation_id, repo.owner, repo.name, existing.number, title=title, body=body
         )
-        return {"number": pr.number}, False
+        return {"number": pr.number, "head_sha": pr.head.sha}, False
     pr = await ctx.gh.create_pull(
         repo.installation_id,
         repo.owner,
@@ -589,7 +723,7 @@ async def _open_or_update_pr(
         head=run.branch or "",
         base=repo.default_branch,
     )
-    return {"number": pr.number}, True
+    return {"number": pr.number, "head_sha": pr.head.sha}, True
 
 
 async def _needs_input(

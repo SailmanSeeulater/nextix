@@ -1,6 +1,7 @@
 """Ticket detail, run history and live run streams, retry and cancel (docs/phase3.md)."""
 
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
@@ -13,10 +14,12 @@ from sse_starlette import EventSourceResponse
 
 from nextix.api.auth import require_user
 from nextix.api.deps import get_enqueuer, get_github, get_publisher, get_redis, get_sessionmaker
-from nextix.db.models import Run, RunEvent, Ticket
+from nextix.db.models import Artifact, Repo, Run, RunEvent, Ticket
 from nextix.db.session import get_db
 from nextix.events.stream import EventPublisher, subscription
 from nextix.github.client import GitHubClient
+from nextix.review.checks import checks_json, sync_checks
+from nextix.runs.artifacts import artifact_json
 from nextix.runs.events import event_json, run_channel
 from nextix.runs.lifecycle import (
     ActiveRunExists,
@@ -28,6 +31,8 @@ from nextix.runs.lifecycle import (
 from nextix.runs.state import ACTIVE_STATUSES, RunStatus
 from nextix.tickets.service import get_card
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["runs"], dependencies=[Depends(require_user)])
 
 PING_INTERVAL_S = 15
@@ -35,20 +40,44 @@ PING_INTERVAL_S = 15
 
 @router.get("/tickets/{ticket_id}")
 async def ticket_detail(
-    ticket_id: uuid.UUID, session: Annotated[AsyncSession, Depends(get_db)]
+    ticket_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    gh: Annotated[GitHubClient, Depends(get_github)],
 ) -> dict[str, Any]:
-    found = await get_card(session, ticket_id)
     ticket = await session.get(Ticket, ticket_id)
-    if found is None or ticket is None:
+    if ticket is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such ticket")
+    repo = await session.get(Repo, ticket.repo_id)
+    if repo is not None and ticket.pr_head_sha and ticket.pr_state == "open":
+        try:
+            await sync_checks(session, gh, repo, ticket)  # at most once a minute
+        except Exception:
+            log.exception("could not refresh checks for ticket %s", ticket_id)
+            await session.rollback()
+    found = await get_card(session, ticket_id)
+    if found is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such ticket")
     card, _ = found
-    runs = await session.scalars(
-        select(Run).where(Run.ticket_id == ticket_id).order_by(Run.attempt.desc())
+    runs = list(
+        await session.scalars(
+            select(Run).where(Run.ticket_id == ticket_id).order_by(Run.attempt.desc())
+        )
     )
+    by_run: dict[uuid.UUID, list[dict[str, Any]]] = {r.id: [] for r in runs}
+    if runs:
+        artifacts = await session.scalars(
+            select(Artifact)
+            .where(Artifact.run_id.in_(list(by_run)))
+            .order_by(Artifact.label, Artifact.kind)
+        )
+        for artifact in artifacts:
+            by_run[artifact.run_id].append(artifact_json(artifact))
     return {
         **card.model_dump(mode="json"),
         "body": ticket.body,
-        "runs": [run_detail(r) for r in runs],
+        "pr_head_sha": ticket.pr_head_sha,
+        "checks": await checks_json(session, ticket),
+        "runs": [{**run_detail(r), "artifacts": by_run[r.id]} for r in runs],
     }
 
 

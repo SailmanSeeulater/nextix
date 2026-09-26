@@ -38,7 +38,8 @@ class ActiveRunExists(Exception):
 
 
 def run_detail(run: Run) -> dict[str, Any]:
-    """The RunDetail shape from docs/phase3.md."""
+    """The RunDetail shape (docs/phase3.md, phase4.md). Artifacts are added by the
+    ticket detail endpoint, which loads them for every run at once."""
 
     def iso(dt: datetime | None) -> str | None:
         return dt.isoformat() if dt else None
@@ -60,6 +61,8 @@ def run_detail(run: Run) -> dict[str, Any]:
         "cost_usd": float(run.cost_usd),
         "summary": run.summary,
         "question": run.question,
+        "tests": run.tests,
+        "review_errors": run.review_errors or [],
     }
 
 

@@ -20,12 +20,14 @@ from nextix.config import get_settings
 from nextix.db.models import Repo, Ticket, WebhookDelivery
 from nextix.github.client import GitHubClient
 from nextix.github.schemas import (
+    GhCheckRun,
     GhInstallation,
     GhIssue,
     GhPullRequest,
     GhRepoRef,
     GhRepository,
 )
+from nextix.review.checks import sync_checks, tickets_for_check, upsert_check_run
 from nextix.tickets import service
 
 log = logging.getLogger(__name__)
@@ -143,6 +145,39 @@ async def handle_pull_request(
     return DispatchResult(changed_tickets={ticket_id})
 
 
+async def handle_check_run(
+    payload: dict[str, Any], session: AsyncSession, gh: GitHubClient
+) -> DispatchResult:
+    repo = await _repo_from_event(payload, session)
+    if repo is None:
+        return DispatchResult(note="repo disabled or unknown")
+    check = GhCheckRun.model_validate(payload["check_run"])
+    await upsert_check_run(session, repo, check)
+    changed = await tickets_for_check(session, repo, check)
+    return DispatchResult(changed_tickets=changed, note=f"check {check.name}: {check.status}")
+
+
+async def handle_check_suite(
+    payload: dict[str, Any], session: AsyncSession, gh: GitHubClient
+) -> DispatchResult:
+    """A finished suite: re-read its check runs, in case single check_run events were lost."""
+    repo = await _repo_from_event(payload, session)
+    if repo is None:
+        return DispatchResult(note="repo disabled or unknown")
+    suite = payload.get("check_suite") or {}
+    sha = suite.get("head_sha")
+    if payload.get("action") != "completed" or not isinstance(sha, str):
+        return DispatchResult(note=f"ignored check_suite.{payload.get('action')}")
+    tickets = list(
+        await session.scalars(
+            select(Ticket).where(Ticket.repo_id == repo.id, Ticket.pr_head_sha == sha)
+        )
+    )
+    for ticket in tickets:
+        await sync_checks(session, gh, repo, ticket, force=True)
+    return DispatchResult(changed_tickets={t.id for t in tickets}, note="check suite completed")
+
+
 async def _board_tickets_for_installation(
     session: AsyncSession, installation_id: int
 ) -> set[uuid.UUID]:
@@ -202,6 +237,8 @@ async def handle_installation_repositories(
 HANDLERS: dict[str, Handler] = {
     "issues": handle_issues,
     "pull_request": handle_pull_request,
+    "check_run": handle_check_run,
+    "check_suite": handle_check_suite,
     "installation": handle_installation,
     "installation_repositories": handle_installation_repositories,
 }

@@ -4,6 +4,8 @@ All calls authenticate as an installation except ``get_repo_installation``,
 which uses the app JWT to discover which installation covers a repo.
 """
 
+import base64
+import binascii
 import re
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -14,12 +16,18 @@ import httpx
 
 from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.schemas import (
+    GhCheckRun,
     GhComment,
     GhInstallation,
     GhIssue,
     GhPullRequest,
     GhRepository,
 )
+
+
+class DiffTooLarge(Exception):
+    """GitHub won't render this PR's diff (too many files or lines)."""
+
 
 _NEXT_LINK = re.compile(r'<([^>]+)>;\s*rel="next"')
 
@@ -235,6 +243,74 @@ class GitHubClient:
                 return []
             raise
         return sorted(e["path"] for e in data.get("tree", []) if e.get("type") == "blob")
+
+    # ------------------------------------------------------------------ files
+
+    async def get_file(
+        self, installation_id: int, owner: str, name: str, path: str, *, ref: str
+    ) -> tuple[str, str] | None:
+        """(text, blob sha) of a file at ``ref``, or None if it doesn't exist there."""
+        try:
+            data = await self._get(
+                installation_id,
+                f"/repos/{owner}/{name}/contents/{quote(path)}",
+                params={"ref": ref},
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        if not isinstance(data, dict) or data.get("type") != "file":
+            return None
+        try:
+            raw = base64.b64decode(data.get("content") or "")
+        except (binascii.Error, ValueError):
+            return None
+        return raw.decode("utf-8", errors="replace"), str(data.get("sha") or "")
+
+    # ------------------------------------------------------------------ review
+
+    async def get_pull_diff(
+        self, installation_id: int, owner: str, name: str, number: int, *, max_bytes: int
+    ) -> tuple[str, bool]:
+        """The PR's unified diff and whether it was cut at ``max_bytes``.
+
+        Raises DiffTooLarge when GitHub refuses to render it (very large PRs).
+        """
+        headers = {
+            **(await self._headers(installation_id)),
+            "Accept": "application/vnd.github.diff",
+        }
+        url = f"{self._api_url}/repos/{owner}/{name}/pulls/{number}"
+        async with self._http.stream("GET", url, headers=headers) as resp:
+            if resp.status_code in (406, 422):
+                raise DiffTooLarge(number)
+            resp.raise_for_status()
+            chunks: list[bytes] = []
+            size = 0
+            truncated = False
+            async for chunk in resp.aiter_bytes():
+                chunks.append(chunk)
+                size += len(chunk)
+                if size > max_bytes:
+                    truncated = True
+                    break
+        body = b"".join(chunks)[:max_bytes]
+        return body.decode("utf-8", errors="replace"), truncated
+
+    async def list_check_runs(
+        self, installation_id: int, owner: str, name: str, sha: str
+    ) -> list[GhCheckRun]:
+        """Every check run on a commit (paginated)."""
+        return [
+            GhCheckRun.model_validate(item)
+            async for item in self._paginate(
+                installation_id,
+                f"/repos/{owner}/{name}/commits/{sha}/check-runs",
+                {},
+                items_key="check_runs",
+            )
+        ]
 
     # ------------------------------------------------------------------ runs
 

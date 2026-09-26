@@ -42,6 +42,8 @@ class TicketCard(BaseModel):
     latest_run: RunSummary | None
     created_via: str | None = None
     updated_at: datetime
+    # The latest run's tests failed (they never block the PR, but the board says so).
+    tests_failing: bool = False
 
 
 class CreateTicketRequest(BaseModel):

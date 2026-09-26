@@ -70,6 +70,9 @@ class Ticket(Base):
     pr_state: Mapped[str | None] = mapped_column(Text)  # open | closed | merged
     created_via: Mapped[str | None] = mapped_column(Text)  # cli | web | mcp | github
     triage_question: Mapped[str | None] = mapped_column(Text)
+    pr_head_sha: Mapped[str | None] = mapped_column(Text)
+    checks_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    checks_error: Mapped[str | None] = mapped_column(Text)  # "forbidden" without Checks: read
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -121,6 +124,8 @@ class Run(Base):
     task_title: Mapped[str | None] = mapped_column(Text)
     task_body: Mapped[str | None] = mapped_column(Text)
     last_batch: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    tests: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    review_errors: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
 
     ticket: Mapped[Ticket] = relationship(back_populates="runs")
     events: Mapped[list["RunEvent"]] = relationship(back_populates="run", order_by="RunEvent.id")
@@ -143,6 +148,29 @@ class RunEvent(Base):
     )
 
     run: Mapped[Run] = relationship(back_populates="events")
+
+
+class CheckRun(Base):
+    """A CI check run on a commit, mirrored from GitHub (webhooks and API reads)."""
+
+    __tablename__ = "check_runs"
+    __table_args__ = (Index("ix_check_runs_repo_head", "repo_id", "head_sha"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    repo_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repos.id"), nullable=False)
+    head_sha: Mapped[str] = mapped_column(Text, nullable=False)
+    head_branch: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    conclusion: Mapped[str | None] = mapped_column(Text)
+    html_url: Mapped[str | None] = mapped_column(Text)
+    details_url: Mapped[str | None] = mapped_column(Text)
+    app_name: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class WebhookDelivery(Base):

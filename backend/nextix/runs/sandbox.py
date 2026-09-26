@@ -10,6 +10,7 @@ import logging
 import tarfile
 import uuid
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Protocol
 
 log = logging.getLogger(__name__)
@@ -44,6 +45,13 @@ class Sandbox(Protocol):
 
     def read_file(self, container_id: str, path: str) -> bytes | None:
         """A file from the (possibly stopped) container, or None if it isn't there."""
+        ...
+
+    def read_tree(self, container_id: str, path: str, *, max_bytes: int) -> dict[str, bytes] | None:
+        """Regular files under a directory, keyed by their path relative to it.
+
+        None if the directory isn't there, or its archive is bigger than ``max_bytes``.
+        """
         ...
 
     def kill(self, container_id: str) -> None: ...
@@ -124,6 +132,37 @@ class DockerSandbox:
                     extracted = tar.extractfile(member)
                     return extracted.read() if extracted else None
         return None
+
+    def read_tree(self, container_id: str, path: str, *, max_bytes: int) -> dict[str, bytes] | None:
+        import docker.errors
+
+        container = self._get(container_id)
+        if container is None:
+            return None
+        try:
+            stream, _ = container.get_archive(path)
+        except docker.errors.NotFound:
+            return None
+        archive = io.BytesIO()
+        for chunk in stream:
+            archive.write(chunk)
+            if archive.tell() > max_bytes:
+                log.warning(
+                    "%s in %s is over %d bytes; ignored", path, container_id[:12], max_bytes
+                )
+                return None
+        archive.seek(0)
+        files: dict[str, bytes] = {}
+        with tarfile.open(fileobj=archive) as tar:
+            for member in tar.getmembers():
+                # Regular files only (no links or devices); drop the directory's own name.
+                parts = PurePosixPath(member.name).parts[1:]
+                if not member.isfile() or not parts or any(p in ("", ".", "..") for p in parts):
+                    continue
+                extracted = tar.extractfile(member)
+                if extracted is not None:
+                    files["/".join(parts)] = extracted.read()
+        return files
 
     def kill(self, container_id: str) -> None:
         import docker.errors

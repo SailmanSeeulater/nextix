@@ -269,6 +269,9 @@ async def link_pull_request(
         return None
     ticket.pr_number = pr.number
     ticket.pr_state = state
+    if pr.head.sha and pr.head.sha != ticket.pr_head_sha:
+        ticket.pr_head_sha = pr.head.sha  # CI checks are shown for this commit
+        ticket.checks_synced_at = None
     ticket.updated_at = datetime.now(UTC)
     return ticket.id
 
@@ -320,6 +323,7 @@ def _card(ticket: Ticket, repo: Repo, run: Run | None) -> TicketCard:
         ),
         created_via=ticket.created_via,
         updated_at=ticket.updated_at,
+        tests_failing=bool(run and run.tests and run.tests.get("passed") is False),
     )
 
 

@@ -65,7 +65,32 @@ class GhComment(_Gh):
 
 class GhRef(_Gh):
     ref: str
+    sha: str | None = None
     repo: GhRepoRef | None = None
+
+
+class GhApp(_Gh):
+    name: str | None = None
+
+
+class GhCheckSuiteRef(_Gh):
+    head_branch: str | None = None
+
+
+class GhCheckRun(_Gh):
+    """A check run, as in check_run webhooks and GET .../commits/{sha}/check-runs."""
+
+    id: int
+    name: str
+    head_sha: str
+    status: str
+    conclusion: str | None = None
+    html_url: str | None = None
+    details_url: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    app: GhApp | None = None
+    check_suite: GhCheckSuiteRef | None = None
 
 
 class GhPullRequest(_Gh):

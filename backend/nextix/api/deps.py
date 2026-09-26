@@ -53,7 +53,11 @@ def celery_enqueue(run_id: uuid.UUID) -> None:
     """Hand a queued run to the worker on the dedicated, one-at-a-time `runs` queue."""
     from nextix.celery_app import celery_app
 
-    soft, hard = run_time_limits(get_settings().agent_default_timeout_min)
+    # A repo's .nextix.yml may raise the timeout (up to MAX_TIMEOUT_MIN), and it is read
+    # only once the run starts, so the limits cover the largest timeout it could set.
+    from nextix.runs.config import MAX_TIMEOUT_MIN
+
+    soft, hard = run_time_limits(max(get_settings().agent_default_timeout_min, MAX_TIMEOUT_MIN))
     celery_app.send_task(
         "nextix.execute_run",
         args=[str(run_id)],

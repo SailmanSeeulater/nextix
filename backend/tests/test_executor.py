@@ -4,8 +4,10 @@ The sandbox and the pusher are fakes; GitHub is respx; Postgres is real.
 """
 
 import asyncio
+import base64
 import json
 import subprocess
+import tempfile
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -15,10 +17,11 @@ from typing import Any
 import httpx
 import pytest
 import respx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nextix.config import Settings, get_settings
-from nextix.db.models import Repo, Run, Ticket
+from nextix.db.models import Artifact, Repo, Run, Ticket
 from nextix.github.client import GitHubClient
 from nextix.runs.executor import WorkerContext, execute_run, sandbox_env, sweep_orphans
 from nextix.runs.push import GitBundlePusher, PushError
@@ -27,6 +30,8 @@ from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, SandboxSpec
 from tests.conftest import FakePublisher
 
 PLAN_TOKEN = "sk-ant-oat01-" + "p" * 40
+ARTIFACT_DIR = Path(tempfile.mkdtemp(prefix="nextix-artifacts-"))
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 REPO = "/repos/acme/widgets"
 
 
@@ -52,6 +57,7 @@ class FakeSandbox:
         self.killed_runs: list[uuid.UUID] = []
         self.labelled: set[uuid.UUID] = set()
         self.on_start: Callable[[], object] | None = None
+        self.tree: dict[str, bytes] | None = None  # the artifacts directory
 
     def start(self, spec: SandboxSpec) -> str:
         if self.start_error:
@@ -75,6 +81,9 @@ class FakeSandbox:
         if path == BUNDLE_PATH:
             return self.bundle
         return None
+
+    def read_tree(self, container_id: str, path: str, *, max_bytes: int) -> dict[str, bytes] | None:
+        return self.tree
 
     def kill(self, container_id: str) -> None:
         self.killed.append(container_id)
@@ -106,6 +115,7 @@ def settings(**overrides: Any) -> Settings:
         "nextix_claude_auth": "subscription",
         "claude_code_oauth_token": PLAN_TOKEN,
         "nextix_public_url": "http://board.test",
+        "artifact_dir": ARTIFACT_DIR,
     }
     return get_settings().model_copy(update={**base, **overrides})
 
@@ -142,7 +152,7 @@ def github(respx_mock: respx.MockRouter) -> dict[str, respx.Route]:
         "number": 12,
         "state": "open",
         "html_url": "https://github.com/acme/widgets/pull/12",
-        "head": {"ref": "nextix/issue-7"},
+        "head": {"ref": "nextix/issue-7", "sha": "abc1234def"},
         "base": {"ref": "main"},
     }
     return {
@@ -150,6 +160,9 @@ def github(respx_mock: respx.MockRouter) -> dict[str, respx.Route]:
             side_effect=token
         ),
         "base": respx_mock.get(f"{REPO}/branches/main").respond(200, json={"name": "main"}),
+        "config": respx_mock.get(f"{REPO}/contents/.nextix.yml").respond(
+            404, json={"message": "Not Found"}
+        ),
         "comment": respx_mock.post(f"{REPO}/issues/7/comments").respond(201, json={}),
         "labels": respx_mock.post(f"{REPO}/issues/7/labels").respond(200, json=[]),
         "find_pr": respx_mock.get(f"{REPO}/pulls").respond(200, json=[]),
@@ -773,3 +786,161 @@ async def test_a_cancel_after_the_sandbox_exits_publishes_nothing(
     run, ticket = await reload(session, run)
     assert run.status == "cancelled"
     assert pusher.calls == [] and not github["create_pr"].called and ticket.pr_number is None
+
+
+# ------------------------------------------------------------------ phase 4: config, artifacts
+
+
+def nextix_yml(respx_mock: respx.MockRouter, text: str) -> respx.Route:
+    return respx_mock.get(f"{REPO}/contents/.nextix.yml").respond(
+        200,
+        json={
+            "type": "file",
+            "sha": "blob123",
+            "content": base64.b64encode(text.encode()).decode(),
+        },
+    )
+
+
+REVIEW_YML = """
+setup: npm ci
+test: npm test
+app:
+  start: npm run dev
+  port: 3000
+  screenshots:
+    - path: /
+agent:
+  max_turns: 12
+  timeout_min: 20
+  allowed_tools: [Read, Edit, Bash]
+  extra_instructions: Use tabs.
+"""
+
+
+async def test_the_repo_config_shapes_the_sandbox(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+    respx_mock: respx.MockRouter,
+) -> None:
+    nextix_yml(respx_mock, REVIEW_YML)
+    run = await queued_run(session)
+    sandbox = FakeSandbox(SUCCESS)
+    await execute_run(run.id, ctx(session_factory, gh, publisher, sandbox))
+
+    env = sandbox.specs[0].env
+    assert (env["NEXTIX_MAX_TURNS"], env["NEXTIX_TIMEOUT_MIN"]) == ("12", "20")
+    assert env["NEXTIX_ALLOWED_TOOLS"] == "Read,Edit,Bash"
+    assert env["NEXTIX_MAX_COST_USD"] == str(get_settings().agent_default_max_cost_usd)
+    config = json.loads(env["NEXTIX_CONFIG_JSON"])
+    assert config["setup"] == ["npm ci"] and config["test"] == "npm test"
+    assert config["app"]["screenshots"] == [
+        {"path": "/", "viewport": {"width": 1280, "height": 800}}
+    ]
+    assert json.loads(env["NEXTIX_TASK_JSON"])["extra_instructions"] == "Use tabs."
+    repo = await session.get(Repo, (await session.get(Ticket, run.ticket_id)).repo_id)  # type: ignore[union-attr]
+    assert repo is not None and repo.config and repo.config["sha"] == "blob123"
+
+
+async def test_a_broken_config_fails_the_run_with_the_reasons(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+    respx_mock: respx.MockRouter,
+) -> None:
+    nextix_yml(respx_mock, "agent:\n  timeout_min: 999\n  colour: blue\n")
+    run = await queued_run(session)
+    sandbox = FakeSandbox(SUCCESS)
+    await execute_run(run.id, ctx(session_factory, gh, publisher, sandbox))
+    run, _ = await reload(session, run)
+    assert (run.status, run.exit_reason) == ("failed", "bad_config")
+    assert sandbox.specs == []
+    said = comments(github)[-1]
+    assert "agent.timeout_min" in said and "agent.colour: not a recognised key" in said
+
+
+def manifest(*items: dict[str, Any], errors: list[dict[str, Any]] | None = None) -> bytes:
+    return json.dumps({"artifacts": list(items), "errors": errors or []}).encode()
+
+
+async def test_artifacts_tests_and_screenshots_reach_the_pr(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+) -> None:
+    run = await queued_run(session)
+    result = {
+        **SUCCESS,
+        "tests": {"command": "npm test", "exit_code": 1, "passed": False, "duration_s": 12.3},
+    }
+    sandbox = FakeSandbox(result)
+    sandbox.tree = {
+        "manifest.json": manifest(
+            {
+                "kind": "test_report",
+                "label": "npm test",
+                "file": "test-report.txt",
+                "meta": {"exit_code": 1, "passed": False, "duration_s": 12.3, "truncated": False},
+            },
+            {
+                "kind": "screenshot_before",
+                "label": "/",
+                "file": "shots/root-before.png",
+                "meta": {"width": 1280, "height": 800},
+            },
+            {
+                "kind": "screenshot_after",
+                "label": "/",
+                "file": "shots/root-after.png",
+                "meta": {"width": 1280, "height": 800},
+            },
+            {
+                "kind": "screenshot_diff",
+                "label": "/",
+                "file": "shots/root-diff.png",
+                "meta": {
+                    "width": 1280,
+                    "height": 800,
+                    "diff_pixels": 15488,
+                    "diff_pct": 1.51,
+                    "evil": "<script>",
+                },
+            },
+            errors=[{"step": "app_after", "label": "/about", "message": "timed out"}],
+        ),
+        "test-report.txt": b"1 failing\ntoken ghs_" + b"x" * 36,
+        "shots/root-before.png": PNG,
+        "shots/root-after.png": PNG,
+        "shots/root-diff.png": PNG,
+    }
+    await execute_run(run.id, ctx(session_factory, gh, publisher, sandbox))
+
+    run, ticket = await reload(session, run)
+    assert run.status == "succeeded"
+    assert run.tests == {"command": "npm test", "exit_code": 1, "passed": False, "duration_s": 12.3}
+    assert run.review_errors == [{"step": "app_after", "label": "/about", "message": "timed out"}]
+    assert ticket.pr_head_sha == "abc1234def"
+    rows = (await session.scalars(select(Artifact).where(Artifact.run_id == run.id))).all()
+    assert sorted(a.kind for a in rows) == [
+        "screenshot_after",
+        "screenshot_before",
+        "screenshot_diff",
+        "test_report",
+    ]
+    diff = next(a for a in rows if a.kind == "screenshot_diff")
+    assert diff.meta == {"width": 1280, "height": 800, "diff_pixels": 15488, "diff_pct": 1.51}
+    report = next(a for a in rows if a.kind == "test_report")
+    stored = (ARTIFACT_DIR / report.path).read_bytes()
+    assert b"1 failing" in stored and b"ghs_" not in stored
+
+    body = json.loads(github["create_pr"].calls[0].request.content)["body"]
+    assert "❌ Tests failed: `npm test` (exit 1, 12 s)" in body
+    assert "| `/` | 1.51% of pixels |" in body
+    assert "❌ Tests failed" in comments(github)[-1]
