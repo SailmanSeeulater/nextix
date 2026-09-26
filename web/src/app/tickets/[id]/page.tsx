@@ -4,10 +4,14 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { TicketView } from "@/components/TicketView";
 import { fetchTicketDetail } from "@/lib/api";
+import { parseTab } from "@/lib/tabs";
 
 export const dynamic = "force-dynamic";
 
-type Props = { params: Promise<{ id: string }> };
+type Props = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+};
 
 // generateMetadata and the page read the same ticket; ask the API once per request.
 const getTicket = cache((id: string) => fetchTicketDetail(id));
@@ -19,8 +23,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: `#${ticket.issue_number} ${ticket.title} · nexTix` };
 }
 
-export default async function TicketPage({ params }: Props) {
+export default async function TicketPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const tab = parseTab((await searchParams).tab);
   const result = await getTicket(id);
   if ("error" in result && result.error === "not_found") notFound();
 
@@ -41,7 +46,11 @@ export default async function TicketPage({ params }: Props) {
             <Link href="/" className="link-button">
               Back to the board
             </Link>
-            <Link href={`/tickets/${encodeURIComponent(id)}`} className="button" prefetch={false}>
+            <Link
+              href={`/tickets/${encodeURIComponent(id)}${tab === "transcript" ? "" : `?tab=${tab}`}`}
+              className="button"
+              prefetch={false}
+            >
               Try again
             </Link>
           </div>
@@ -57,7 +66,12 @@ export default async function TicketPage({ params }: Props) {
 
   return (
     <main>
-      <TicketView key={result.ticket.id} initial={result.ticket} renderedAt={renderedAt} />
+      <TicketView
+        key={result.ticket.id}
+        initial={result.ticket}
+        renderedAt={renderedAt}
+        initialTab={tab}
+      />
     </main>
   );
 }

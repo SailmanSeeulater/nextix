@@ -43,7 +43,7 @@ const STREAM_KINDS = ["state", "log", "message", "tool_use", "tool_result", "usa
 const BOTTOM_SLACK = 64;
 
 type History = "loading" | "loaded" | "partial" | "failed";
-type Connection = "connecting" | "live" | "reconnecting";
+export type Connection = "connecting" | "live" | "reconnecting";
 
 function isAtBottom(): boolean {
   const doc = document.documentElement;
@@ -68,24 +68,31 @@ function parseRun(data: string): RunDetail | null {
 /**
  * The run's transcript: stored history first, then the live stream (which replays
  * stored events, sends `ready`, then live ones). Events merge by id, so a replay or
- * a reconnect never duplicates a line.
+ * a reconnect never duplicates a line. It stays mounted while another tab is shown, so
+ * the stream keeps running; it only follows the bottom of the page while visible.
  */
 export const Transcript = memo(function Transcript({
   runId,
   status,
   noWorker,
+  visible,
   onRunUpdated,
   onUsage,
   onStreamTrouble,
+  onConnection,
 }: {
   runId: string;
   status: string;
   /** A queued run nobody has claimed for a long while. */
   noWorker: boolean;
+  /** False while another tab is shown: no auto-scroll, no jump button. */
+  visible: boolean;
   onRunUpdated: (run: RunDetail) => void;
   onUsage: (runId: string, usage: Usage) => void;
   /** The stream dropped; the parent re-reads the ticket in case the run ended meanwhile. */
   onStreamTrouble: () => void;
+  /** The live stream's state for the tab bar's signal; null when the run isn't live. */
+  onConnection: (connection: Connection | null) => void;
 }) {
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [history, setHistory] = useState<History>("loading");
@@ -95,11 +102,19 @@ export const Transcript = memo(function Transcript({
   const active = isActiveStatus(status);
 
   const eventsRef = useRef(events);
-  const callbacks = useRef({ onRunUpdated, onUsage, onStreamTrouble });
+  const visibleRef = useRef(visible);
+  const callbacks = useRef({ onRunUpdated, onUsage, onStreamTrouble, onConnection });
   useEffect(() => {
     eventsRef.current = events;
-    callbacks.current = { onRunUpdated, onUsage, onStreamTrouble };
+    visibleRef.current = visible;
+    callbacks.current = { onRunUpdated, onUsage, onStreamTrouble, onConnection };
   });
+
+  useEffect(() => {
+    const report = callbacks.current.onConnection;
+    report(active ? connection : null);
+    return () => report(null);
+  }, [active, connection]);
 
   // History, then (for an active run) the live stream. Re-runs when the run stops
   // being active: the stream closes and one last history read catches the tail.
@@ -183,6 +198,8 @@ export const Transcript = memo(function Transcript({
     let frame = 0;
     const measure = () => {
       frame = 0;
+      // Scrolling another tab says nothing about where the reader is in the transcript.
+      if (!visibleRef.current) return;
       const bottom = isAtBottom();
       if (bottom) jumpingRef.current = false;
       // Mid-jump scroll positions aren't the reader scrolling away.
@@ -202,10 +219,14 @@ export const Transcript = memo(function Transcript({
   }, []);
 
   useLayoutEffect(() => {
-    if (history === "loading") return;
+    if (history === "loading" || !visible) {
+      // Hidden behind another tab: settle again when it comes back.
+      if (!visible) settledRef.current = false;
+      return;
+    }
     if (!settledRef.current) {
-      // First paint with history: follow only if it all fits (or the reader is already
-      // at the bottom); never yank them past the header on load.
+      // First paint with history (or back from another tab): follow only if it all fits
+      // or the reader is already at the bottom; never yank them past the header.
       settledRef.current = true;
       followRef.current = isAtBottom();
     } else if (followRef.current) {
@@ -213,7 +234,7 @@ export const Transcript = memo(function Transcript({
     }
     const frame = requestAnimationFrame(() => setAtBottom(isAtBottom()));
     return () => cancelAnimationFrame(frame);
-  }, [events, history]);
+  }, [events, history, visible]);
 
   function jumpToLatest() {
     followRef.current = true;
@@ -237,14 +258,7 @@ export const Transcript = memo(function Transcript({
   const hasOutput = hasAgentOutput(items);
 
   return (
-    <section className="transcript" aria-labelledby="transcript-title">
-      <div className="transcript-bar">
-        <h2 className="transcript-title" id="transcript-title">
-          Transcript
-        </h2>
-        {active ? <StreamSignal connection={connection} /> : null}
-      </div>
-
+    <div className="transcript">
       {(history === "partial" || (history === "failed" && hasOutput)) && (
         <p className="transcript-note" data-tone="error" role="status">
           Part of this transcript couldn&apos;t be loaded.{" "}
@@ -265,29 +279,32 @@ export const Transcript = memo(function Transcript({
         <EmptyState history={history} status={status} noWorker={noWorker} onRetry={reload} />
       )}
 
-      {loadedSomething && !atBottom && items.length > 0 ? (
+      {visible && loadedSomething && !atBottom && items.length > 0 ? (
         <button type="button" className="jump-latest" onClick={jumpToLatest}>
           <ArrowDown size={15} strokeWidth={2.5} aria-hidden />
           {active ? "Jump to latest" : "Jump to the end"}
         </button>
       ) : null}
-    </section>
+    </div>
   );
 });
 
-function StreamSignal({ connection }: { connection: Connection }) {
+/** The live run stream's state, shown at the end of the ticket page's tab bar. */
+export function StreamSignal({ connection }: { connection: Connection }) {
   if (connection === "live") {
     return (
       <span className="signal transcript-signal" role="status">
         <span className="live-dot" data-state="live" aria-hidden />
-        <span>Live</span>
+        <span className="signal-word">Live</span>
       </span>
     );
   }
   return (
     <span className="signal transcript-signal" data-state={connection} role="status">
       <RefreshCw size={14} strokeWidth={2.5} className="spin" aria-hidden />
-      <span>{connection === "reconnecting" ? "Reconnecting…" : "Connecting…"}</span>
+      <span className="signal-word">
+        {connection === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+      </span>
     </span>
   );
 }

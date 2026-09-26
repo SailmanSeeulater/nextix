@@ -11,7 +11,9 @@ export const dynamic = "force-dynamic";
 // Never reachable from the browser: GitHub and sandboxes call the API directly.
 const BLOCKED_PREFIXES = ["github/", "internal/"];
 const FORWARD_REQUEST_HEADERS = ["accept", "content-type", "last-event-id"];
-const FORWARD_RESPONSE_HEADERS = ["content-type", "cache-control"];
+// nosniff keeps the browser from reading a stored test report or screenshot (untrusted
+// run output served from /api/artifacts/*) as anything but its declared type.
+const FORWARD_RESPONSE_HEADERS = ["content-type", "cache-control", "x-content-type-options"];
 
 async function forward(
   request: NextRequest,

@@ -3,6 +3,7 @@ import {
   applyEvent,
   changesLayout,
   formatElapsed,
+  formatSeconds,
   groupByColumn,
   indexCards,
   formatAgo,
@@ -111,6 +112,16 @@ describe("liveness helpers", () => {
     expect(formatElapsed("2026-09-25T10:01:00Z", now)).toBe("5s");
     expect(formatElapsed("2026-09-25T10:00:00Z", now)).toBe("1m 05s");
     expect(formatElapsed("2026-09-25T08:00:00Z", now)).toBe("2h 1m");
+  });
+
+  it("formats measured durations the same way, with tenths under ten seconds", () => {
+    expect(formatSeconds(4.24)).toBe("4.2s");
+    expect(formatSeconds(0)).toBe("0s");
+    expect(formatSeconds(9.96)).toBe("10s");
+    expect(formatSeconds(12.3)).toBe("12s");
+    expect(formatSeconds(65)).toBe("1m 05s");
+    expect(formatSeconds(7260)).toBe("2h 1m");
+    expect(formatSeconds(Number.NaN)).toBe("–");
   });
 
   it("re-reads a live run's heartbeat before it would look lost", () => {

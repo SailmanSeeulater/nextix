@@ -4,6 +4,8 @@ import {
   cancelRun,
   createTicket,
   describeError,
+  fetchArtifactText,
+  fetchTicketDiff,
   loadRunHistory,
   loadTicketDetail,
   parseLabels,
@@ -188,6 +190,80 @@ describe("loadTicketDetail", () => {
       id: "t1",
     });
     expect(await loadTicketDetail("t1", respond(404, { detail: "not found" }))).toBeNull();
+  });
+});
+
+describe("fetchTicketDiff", () => {
+  it("returns the diff from the ticket's diff endpoint", async () => {
+    let url = "";
+    const fake = (async (u: string) => {
+      url = u;
+      return new Response(
+        JSON.stringify({ pr_number: 57, head_sha: "abc", diff: "diff --git a/x b/x\n", truncated: false }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    expect(await fetchTicketDiff("t 1", fake)).toEqual({
+      pr_number: 57,
+      head_sha: "abc",
+      diff: "diff --git a/x b/x\n",
+      truncated: false,
+    });
+    expect(url).toBe("/api/tickets/t%201/diff");
+  });
+
+  it("means no pull request yet on 404", async () => {
+    expect(await fetchTicketDiff("t1", respond(404, { detail: "this ticket has no pull request yet" }))).toBeNull();
+  });
+
+  it("throws a readable error when GitHub or the network fails", async () => {
+    await expect(fetchTicketDiff("t1", respond(502, { detail: "GitHub didn't return the diff" }))).rejects.toThrow(
+      "GitHub didn't return the diff",
+    );
+    await expect(fetchTicketDiff("t1", respond(502, {}))).rejects.toThrow(/Try again in a moment/);
+    const offline = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+    await expect(fetchTicketDiff("t1", offline)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("refuses a body that isn't a diff", async () => {
+    await expect(fetchTicketDiff("t1", respond(200, { nope: true }))).rejects.toThrow(/shape/);
+  });
+
+  it("passes an abort through instead of calling it unreachable", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const aborting = (async () => {
+      throw new DOMException("aborted", "AbortError");
+    }) as unknown as typeof fetch;
+    await expect(fetchTicketDiff("t1", aborting, controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+  });
+});
+
+describe("fetchArtifactText", () => {
+  it("reads a stored artifact as text", async () => {
+    const fake = (async () => new Response("PASS 12 tests\n", { status: 200 })) as unknown as typeof fetch;
+    expect(await fetchArtifactText("/api/artifacts/a1", fake)).toBe("PASS 12 tests\n");
+  });
+
+  it("never fetches anything but an artifact path", async () => {
+    let called = false;
+    const fake = (async () => {
+      called = true;
+      return new Response("");
+    }) as unknown as typeof fetch;
+    await expect(fetchArtifactText("https://evil.example/x", fake)).rejects.toBeInstanceOf(ApiError);
+    await expect(fetchArtifactText("/api/tickets", fake)).rejects.toBeInstanceOf(ApiError);
+    expect(called).toBe(false);
+  });
+
+  it("explains a missing file", async () => {
+    await expect(fetchArtifactText("/api/artifacts/a1", respond(404, {}))).rejects.toThrow(
+      "This file is no longer stored.",
+    );
   });
 });
 

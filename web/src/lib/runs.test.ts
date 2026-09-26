@@ -182,6 +182,38 @@ describe("merging live updates", () => {
     expect(applyUsage(r, { input_tokens: 50, output_tokens: 5, cost_usd: 0.01 })).toBe(r);
   });
 
+  it("keeps artifacts and test results that a stream payload leaves out", () => {
+    const artifacts = [
+      { id: "a1", kind: "test_report", label: "npm test", url: "/api/artifacts/a1", meta: null },
+    ];
+    const tests = { command: "npm test", exit_code: 1, passed: false, duration_s: 12.3 };
+    const errors = [{ step: "setup", label: null, message: "npm ci exited 1" }];
+    const known = [run({ status: "succeeded", artifacts, tests, review_errors: errors })];
+    // run.state / run.updated payloads carry no artifacts (only the ticket read does).
+    const streamed = upsertRun(known, run({ status: "succeeded", cost_usd: 0.5 }))[0]!;
+    expect(streamed).toMatchObject({ artifacts, tests, review_errors: errors, cost_usd: 0.5 });
+    // A fresh ticket read replaces them.
+    const fresh = mergeRuns(known, [run({ status: "succeeded", artifacts: [], tests: null })])[0]!;
+    expect(fresh.artifacts).toEqual([]);
+    expect(fresh.tests).toBeNull();
+  });
+
+  it("doesn't let a stale ticket read wipe the results a finished run already has", () => {
+    const artifacts = [
+      { id: "a1", kind: "test_report", label: "npm test", url: "/api/artifacts/a1", meta: null },
+    ];
+    const tests = { command: "npm test", exit_code: 0, passed: true, duration_s: 3 };
+    const known = [run({ status: "succeeded", artifacts, tests, review_errors: [] })];
+    // A read that left before the run ended comes back with the running copy.
+    const stale = run({ status: "running", artifacts: [], tests: null, review_errors: [] });
+    const merged = mergeRuns(known, [stale])[0]!;
+    expect(merged).toMatchObject({ status: "succeeded", artifacts, tests });
+    // A finished run learned from the stream (no artifacts yet) still takes the read's list.
+    const streamedOnly = [run({ status: "succeeded", tests })];
+    const read = run({ status: "succeeded", artifacts, tests });
+    expect(mergeRuns(streamedOnly, [read])[0]!.artifacts).toEqual(artifacts);
+  });
+
   it("merges a card over the detail without dropping body or runs", () => {
     const detail: TicketDetail = { ...card(), body: "Steps", runs: [run()] };
     const merged = mergeCard(detail, card({ column: "in_review", pr_number: 9, pr_url: "u" }));
@@ -263,6 +295,30 @@ describe("runFields", () => {
     expect(field(fields, "Queued")?.value).toBe("10m 00s");
     expect(field(fields, "Spent")).toBeUndefined();
     expect(field(fields, "Tokens")).toBeUndefined();
+  });
+
+  it("shows the test result, flagging a failure with its exit code", () => {
+    const failed = runFields(
+      card({ column: "in_review" }),
+      run({
+        status: "succeeded",
+        finished_at: "2026-09-25T10:04:30Z",
+        tests: { command: "npm test", exit_code: 1, passed: false, duration_s: 12.3 },
+      }),
+      NOW,
+    );
+    expect(failed.find((f) => f.label === "Tests")).toMatchObject({
+      value: "Failed",
+      tone: "alert",
+      detail: "exit 1 · 12s",
+    });
+    const passed = runFields(
+      card({ column: "in_review" }),
+      run({ status: "succeeded", tests: { command: "pytest", exit_code: 0, passed: true, duration_s: 4.24 } }),
+      NOW,
+    );
+    expect(passed.find((f) => f.label === "Tests")).toMatchObject({ value: "Passed", detail: "4.2s" });
+    expect(field(runFields(card(), run({ tests: null }), NOW), "Tests")).toBeUndefined();
   });
 
   it("falls back to the board's fields for a ticket that never ran", () => {

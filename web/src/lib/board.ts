@@ -147,6 +147,19 @@ export function formatElapsed(fromIso: string, now: number): string {
   return `${sec}s`;
 }
 
+/** A measured duration in seconds, as formatElapsed writes times: "4.2s", "12s", "1m 05s", "1h 2m". */
+export function formatSeconds(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "–";
+  if (seconds < 9.95) return `${Number(seconds.toFixed(1))}s`;
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec.toString().padStart(2, "0")}s`;
+  return `${sec}s`;
+}
+
 export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }

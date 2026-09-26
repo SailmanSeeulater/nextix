@@ -74,6 +74,44 @@ describe.each(THEMES.map((t) => [t.name, t] as const))("%s", (_name, theme) => {
     expect(contrast(hex(t.accent), hex(t.bg)), "stalled outline").toBeGreaterThanOrEqual(3);
     expect(contrast(hex(t.green), hex(t.bg)), "live dot").toBeGreaterThanOrEqual(3);
   });
+
+  // The review tabs (docs/phase4.md): diff tints, the segmented rail, pass/fail marks.
+  it("keeps diff lines readable on their green and red tints", () => {
+    const raised = hex(t.raised);
+    const tints = {
+      add: mix(hex(t.green), 0.13, raised), // --diff-add
+      addEdit: mix(hex(t.green), 0.3, raised), // --diff-add-edit
+      del: mix(hex(t.red), 0.13, raised), // --diff-del
+      delEdit: mix(hex(t.red), 0.3, raised), // --diff-del-edit
+    };
+    for (const [name, fill] of Object.entries(tints)) {
+      expect(contrast(hex(t.ink), fill), `code on ${name}`).toBeGreaterThanOrEqual(AA);
+    }
+    // Line numbers on changed rows are ink-2; on plain rows ink-3 (gated on raised above).
+    expect(contrast(hex(t.ink2), tints.add), "line number on add").toBeGreaterThanOrEqual(AA);
+    expect(contrast(hex(t.ink2), tints.del), "line number on delete").toBeGreaterThanOrEqual(AA);
+    // +/− counts are green and red text on a file header and on the ground.
+    expect(contrast(hex(t.green), raised), "+ count on a file").toBeGreaterThanOrEqual(AA);
+    expect(contrast(hex(t.green), hex(t.bg)), "+ count on the ground").toBeGreaterThanOrEqual(AA);
+    expect(contrast(hex(t.red), hex(t.bg)), "− count on the ground").toBeGreaterThanOrEqual(AA);
+  });
+
+  it("keeps tab and segment words readable on the rail", () => {
+    // --rail: field on dark themes, ink washed 7% into the ground on light ones.
+    const rail = theme.mode === "light" ? mix(hex(t.ink), 0.07, hex(t.bg)) : hex(t.field);
+    expect(contrast(hex(t.ink2), rail), "inactive tab").toBeGreaterThanOrEqual(AA);
+    expect(contrast(hex(t.ink), hex(t.raised)), "selected tab").toBeGreaterThanOrEqual(AA);
+    expect(contrast(hex(t.ink3), rail), "tab glyph").toBeGreaterThanOrEqual(3);
+    expect(contrast(hex(t.red), rail), "failing Checks glyph").toBeGreaterThanOrEqual(3);
+    // The selected segment must stand apart from the rail, not only by its shadow.
+    expect(deltaE(hex(t.raised), rail), "selected segment vs rail").toBeGreaterThanOrEqual(0.02);
+  });
+
+  it("keeps pass and fail marks visible on the test report and check list", () => {
+    expect(contrast(hex(t.green), hex(t.raised)), "passed glyph").toBeGreaterThanOrEqual(3);
+    expect(contrast(hex(t.red), hex(t.raised)), "Tests failed").toBeGreaterThanOrEqual(AA);
+    expect(contrast(hex(t.ink2), hex(t.raised)), "check status word").toBeGreaterThanOrEqual(AA);
+  });
 });
 
 describe("theme plumbing", () => {

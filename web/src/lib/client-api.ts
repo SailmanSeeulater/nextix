@@ -2,6 +2,7 @@
  * Browser-side calls. They go to this app's own /api/* proxy, which adds the
  * API token server-side; the browser never sees it.
  */
+import { isArtifactUrl } from "./artifacts";
 import type {
   CreateTicketResult,
   RunDetail,
@@ -9,6 +10,7 @@ import type {
   RunEventsPage,
   TicketCard,
   TicketDetail,
+  TicketDiff,
 } from "./types";
 
 export interface CreateTicketInput {
@@ -98,6 +100,74 @@ export async function loadTicketDetail(
   } catch {
     return null;
   }
+}
+
+/**
+ * The PR's unified diff (GET /api/tickets/{id}/diff). Null when the ticket has no pull
+ * request yet (404); any other failure throws an ApiError with a readable sentence.
+ */
+export async function fetchTicketDiff(
+  id: string,
+  fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<TicketDiff | null> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`/api/tickets/${encodeURIComponent(id)}/diff`, {
+      cache: "no-store",
+      signal,
+    });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new ApiError(UNREACHABLE);
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new ApiError(
+      await describeError(res, { 502: "GitHub didn't return the diff. Try again in a moment." }),
+    );
+  }
+  let body: Partial<TicketDiff> | null;
+  try {
+    body = (await res.json()) as Partial<TicketDiff> | null;
+  } catch {
+    body = null;
+  }
+  if (!body || typeof body.diff !== "string") {
+    throw new ApiError("The diff came back in a shape this page doesn't understand.");
+  }
+  return {
+    pr_number: typeof body.pr_number === "number" ? body.pr_number : 0,
+    head_sha: typeof body.head_sha === "string" ? body.head_sha : null,
+    diff: body.diff,
+    truncated: body.truncated === true,
+  };
+}
+
+/**
+ * A stored text artifact (a test report), read from its same-origin URL. Only
+ * /api/artifacts/* URLs are fetched; anything else is refused before any request.
+ */
+export async function fetchArtifactText(
+  url: string,
+  fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (!isArtifactUrl(url)) {
+    throw new ApiError("This file isn't stored by nexTix.");
+  }
+  let res: Response;
+  try {
+    // Artifacts never change once stored, so the browser cache may answer.
+    res = await fetchImpl(url, { signal });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new ApiError(UNREACHABLE);
+  }
+  if (!res.ok) {
+    throw new ApiError(await describeError(res, { 404: "This file is no longer stored." }));
+  }
+  return res.text();
 }
 
 /** The API's page ceiling for GET /api/runs/{id}/events. */

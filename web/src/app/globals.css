@@ -61,17 +61,32 @@
   /* Apple platforms render SF, Wallet's own face; everywhere else gets self-hosted Geist,
      the closest open grotesque in character. SF itself can't be licensed for the web. */
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-geist), sans-serif;
-  /* Only for verbatim tool output and input in a transcript: that text is literally a
-     terminal's, and its columns only line up in a fixed-width face. Nowhere else. */
+  /* Only for verbatim terminal and file text: tool input and output in a transcript, diff
+     lines, the test command and its output. Their columns only line up in a fixed-width
+     face. Nowhere else. */
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   /* Things that float above the page (the theme popover, the jump-to-latest pill). */
   --shadow-float:
     0 18px 40px -18px var(--shadow), 0 2px 6px color-mix(in srgb, var(--shadow) 35%, transparent);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* The rail under segmented controls (ticket tabs, diff layout, compare mode): darker than
+     the raised segment on dark themes; a washed ink on light ones, where field is white. */
+  --rail: var(--field);
+
+  /* Diff lines: the theme's green and red washed into the surface a file sits on. Text on
+     them is ink, and line numbers on changed rows are ink-2 (ink-3 falls under 4.5:1). */
+  --diff-add: color-mix(in srgb, var(--green) 13%, var(--raised));
+  --diff-add-edit: color-mix(in srgb, var(--green) 30%, var(--raised));
+  --diff-del: color-mix(in srgb, var(--red) 13%, var(--raised));
+  --diff-del-edit: color-mix(in srgb, var(--red) 30%, var(--raised));
+  /* Height of the sticky ticket tab bar, so file headers stick just under it. */
+  --tabbar-h: 55px;
 }
 
 :root[data-mode="light"] {
   --on-hue: #ffffff;
+  --rail: color-mix(in srgb, var(--ink) 7%, var(--bg));
 }
 
 html {
@@ -786,6 +801,21 @@ a.button {
   color: var(--accent);
 }
 
+/* The latest run's tests failed: a secondary line in the pass's own ink, glyph and word. */
+.pass-flag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--pass-label);
+}
+
+.pass-flag svg {
+  flex: none;
+}
+
 /* A stalled Doing pass goes hollow: the accent outline of a Doing pass with no fill. */
 .pass[data-stale="true"] {
   border: 2px dashed var(--accent);
@@ -1210,6 +1240,7 @@ a.button {
 }
 
 .pass-field dd.pass-field-detail {
+  display: block;
   margin-top: 2px;
   font-size: 12px;
   font-weight: 500;
@@ -1343,29 +1374,110 @@ a.button {
   margin-top: 10px;
 }
 
-/* ------------------------------------------------------------------ transcript */
+/* ------------------------------------------------------------------ ticket tabs */
 
-.transcript {
-  margin-top: 28px;
-}
-
-.transcript-bar {
+/* Transcript · Diff · Before / After · Checks, stuck to the top while a panel scrolls. */
+.detail-tabbar {
   position: sticky;
   top: 0;
   z-index: 5;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 0 11px;
+  min-height: var(--tabbar-h);
+  margin-top: 28px;
+  padding: 8px 0;
   background: var(--ground);
   border-bottom: 1px solid var(--line);
 }
 
-.transcript-title {
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+.segmented,
+.detail-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--rail);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
+
+.detail-tabs {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.segmented button,
+.detail-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 9px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease-out),
+    color 160ms var(--ease-out);
+}
+
+.segmented button {
+  padding: 5px 11px;
+  font-size: 12.5px;
+}
+
+.segmented button:hover,
+.detail-tab:hover {
+  color: var(--ink);
+}
+
+.segmented button[aria-pressed="true"],
+.detail-tab[aria-selected="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 55%, transparent);
+}
+
+.segmented button:focus-visible,
+.detail-tab:focus-visible {
+  outline-offset: -2px;
+}
+
+.detail-tab svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.detail-tab[aria-selected="true"] svg {
+  color: var(--ink-2);
+}
+
+/* A failing Checks tab: the glyph turns to a red warning, and the word says so to readers. */
+.detail-tab[data-alert="true"] svg {
+  color: var(--danger);
+}
+
+.detail-panel {
+  padding-top: 18px;
+}
+
+.detail-panel:focus-visible {
+  outline-offset: 6px;
+  border-radius: 8px;
+}
+
+.detail-panel[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ transcript */
 
 .transcript-signal {
   margin-left: auto;
@@ -1386,7 +1498,7 @@ a.button {
 }
 
 .transcript-note {
-  margin-top: 12px;
+  margin-bottom: 12px;
   font-size: 13px;
   line-height: 1.45;
   color: var(--ink-2);
@@ -1408,7 +1520,7 @@ a.button {
   flex-direction: column;
   gap: 8px;
   margin: 0;
-  padding: 18px 0 0;
+  padding: 0;
   list-style: none;
 }
 
@@ -1612,18 +1724,54 @@ a.button {
   color: var(--ink-3);
 }
 
+/* Empty and waiting states in every tab: a dashed outline where content will land. */
+.panel-empty,
 .transcript-empty {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 10px;
-  margin-top: 18px;
   padding: 18px 16px;
   border: 1.5px dashed var(--hairline);
   border-radius: var(--radius-pass);
   font-size: 14px;
   line-height: 1.45;
   color: var(--ink-2);
+}
+
+.transcript-list + .transcript-empty {
+  margin-top: 18px;
+}
+
+.panel-empty svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.panel-empty p {
+  flex: 1 1 260px;
+}
+
+.panel-empty strong {
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.panel-empty code,
+.test-field code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.panel-empty[data-tone="error"],
+.panel-empty[data-tone="error"] svg {
+  color: var(--danger);
+}
+
+.panel-empty .link-button {
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
 }
 
 .transcript-empty svg {
@@ -1667,6 +1815,899 @@ a.button {
     opacity: 0;
     transform: translate(-50%, 8px);
   }
+}
+
+/* ------------------------------------------------------------------ review panels */
+
+/* A summary line and its tools above a panel's content. */
+.panel-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+
+.panel-bar-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.panel-bar-meta {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.panel-bar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 13px;
+}
+
+.panel-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+}
+
+.panel-heading {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.panel-heading-row .panel-heading {
+  margin-bottom: 0;
+}
+
+.checks-section > .panel-heading {
+  margin-bottom: 12px;
+}
+
+.panel-heading-meta {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+/* Something to know before the content: flat, with a line ring (not an error). */
+.panel-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-surface);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.panel-note > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ink-3);
+}
+
+.panel-note-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.panel-note a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+}
+
+.panel-note a:hover {
+  text-decoration-color: currentColor;
+}
+
+.panel-note strong {
+  font-weight: 650;
+  color: var(--ink);
+}
+
+/* Review steps that failed without failing the run, shown where their output would be. */
+.review-errors {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.review-errors li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+.review-errors svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.review-errors p {
+  overflow-wrap: anywhere;
+}
+
+.review-error-step {
+  font-weight: 650;
+}
+
+/* ------------------------------------------------------------------ diff */
+
+.diff-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+/* The sign carries the meaning; the hue only echoes it. */
+.diff-count[data-sign="add"] {
+  color: var(--green);
+}
+
+.diff-count[data-sign="del"] {
+  color: var(--danger);
+}
+
+.diff-index {
+  margin-bottom: 12px;
+}
+
+.diff-index summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.diff-index summary::-webkit-details-marker {
+  display: none;
+}
+
+.diff-index summary:hover {
+  color: var(--ink);
+}
+
+.diff-index[open] .t-chevron {
+  transform: rotate(90deg);
+}
+
+.diff-index ol {
+  display: grid;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 6px 0 0;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-surface);
+  list-style: none;
+}
+
+.diff-index-item {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-index-item:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+
+.diff-index-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.diff-files {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A file: a flat surface with a line ring, its header sticking under the tab bar. */
+.diff-file {
+  scroll-margin-top: calc(var(--tabbar-h) + 10px);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-surface);
+}
+
+.diff-file-head {
+  position: sticky;
+  top: var(--tabbar-h);
+  z-index: 2;
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.diff-file[data-open="true"] .diff-file-head {
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.diff-file-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-file-toggle[data-static] {
+  cursor: default;
+  padding-left: 34px;
+}
+
+.diff-file-toggle:focus-visible {
+  outline-offset: -2px;
+}
+
+.diff-file[data-open="true"] .t-chevron {
+  transform: rotate(90deg);
+}
+
+.diff-file-icon {
+  flex: none;
+  color: var(--ink-2);
+}
+
+.diff-file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.diff-file-path {
+  font-weight: 650;
+}
+
+.diff-file-previous {
+  color: var(--ink-2);
+}
+
+.diff-file-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.diff-file-counts {
+  flex: none;
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 12.5px;
+}
+
+.diff-file-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 12px 34px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.diff-file-body .diff-file-note {
+  padding: 12px;
+}
+
+.diff-file-body {
+  overflow-x: auto;
+  border-radius: 0 0 12px 12px;
+  /* Files far off screen skip layout and paint, so "Expand all" on a long diff stays usable. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px;
+}
+
+.diff-raw {
+  max-height: none;
+  margin: 0;
+  border-radius: 0 0 12px 12px;
+}
+
+/* react-diff-view's table, drawn from the theme (its own stylesheet isn't loaded). */
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  tab-size: 4;
+}
+
+.diff-table td {
+  padding-top: 0;
+  padding-bottom: 0;
+  vertical-align: top;
+}
+
+.diff-gutter-col {
+  width: 6ch;
+}
+
+.diff-gutter {
+  padding: 0 1ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  user-select: none;
+}
+
+.diff-code {
+  position: relative;
+  padding: 0 12px 0 2.4ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The +/− prefix GitHub prints, so a change never rests on its tint alone. */
+.diff-code-insert::before,
+.diff-code-delete::before {
+  position: absolute;
+  left: 0.8ch;
+  color: var(--ink-2);
+}
+
+.diff-code-insert::before {
+  content: "+";
+}
+
+.diff-code-delete::before {
+  content: "−";
+}
+
+.diff-gutter-insert,
+.diff-code-insert {
+  background: var(--diff-add);
+}
+
+.diff-gutter-delete,
+.diff-code-delete {
+  background: var(--diff-del);
+}
+
+.diff-gutter-insert,
+.diff-gutter-delete {
+  color: var(--ink-2);
+}
+
+.diff-code-edit {
+  color: inherit;
+  border-radius: 3px;
+}
+
+.diff-code-insert .diff-code-edit {
+  background: var(--diff-add-edit);
+}
+
+.diff-code-delete .diff-code-edit {
+  background: var(--diff-del-edit);
+}
+
+/* In split view, an empty side of a one-sided change. */
+.diff-gutter-omit,
+.diff-code-omit {
+  background: color-mix(in srgb, var(--ink) 3%, var(--surface));
+}
+
+.diff-split .diff-code + .diff-gutter {
+  box-shadow: inset 1px 0 0 var(--line);
+}
+
+.diff-decoration {
+  user-select: none;
+}
+
+.diff-hunk-head .diff-decoration-content,
+.diff-decoration-content {
+  padding: 4px 12px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-hunk + .diff-decoration .diff-decoration-content {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+/* ------------------------------------------------------------------ before / after */
+
+.shots {
+  display: grid;
+}
+
+.shots-route + .shots-route {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.shots-route-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+}
+
+.shots-route-title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.shots-route-size {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.shots-route-change {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.shots-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.shot {
+  margin: 0;
+  min-width: 0;
+}
+
+.shot-frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+a.shot-frame:hover {
+  box-shadow: 0 0 0 1px var(--hairline), 0 0 0 4px color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.shot-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.shot-frame[data-missing] {
+  gap: 6px;
+  align-content: center;
+  border: 1.5px dashed var(--hairline);
+  box-shadow: none;
+  background: none;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.shot-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 12px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.shot figcaption {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.shot-caption {
+  font-weight: 650;
+}
+
+.shot-note {
+  color: var(--ink-3);
+}
+
+.shots-missing {
+  padding: 16px;
+  border: 1.5px dashed var(--hairline);
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+/* The slider: before in flow, after on top clipped at the divider. */
+.compare-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: ew-resize;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.compare-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.compare-frame .compare-after {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 0 0 var(--pos));
+}
+
+/* The real control: a range input over the image, invisible, driven by keys and readers. */
+.compare-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--pos);
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg) 55%, transparent);
+  pointer-events: none;
+}
+
+.compare-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--pane);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-float);
+  transform: translate(-50%, -50%);
+}
+
+/* No ring while the focus came from a drag (data-pointer); a key press brings it back. */
+.compare-frame:not([data-pointer]) .compare-input:focus-visible + .compare-divider .compare-handle {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.compare-tag {
+  position: absolute;
+  top: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--pane);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+  font-size: 12px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+.compare-tag[data-side="before"] {
+  left: 10px;
+}
+
+.compare-tag[data-side="after"] {
+  right: 10px;
+}
+
+.compare-hint {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+/* ------------------------------------------------------------------ checks */
+
+.checks {
+  display: grid;
+  gap: 32px;
+}
+
+/* The run's test result: flat with a line ring; a failure gets the red ring of an error. */
+.test-result {
+  padding: 16px 18px 18px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-surface);
+}
+
+.test-result[data-passed="false"] {
+  box-shadow:
+    inset 0 0 0 1.5px var(--danger),
+    0 1px 0 var(--overlay) inset;
+}
+
+.test-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.test-result[data-passed="false"] .test-status {
+  color: var(--danger);
+}
+
+.test-result[data-passed="true"] .test-status svg {
+  color: var(--green);
+}
+
+.test-fields {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto auto;
+  justify-content: start;
+  gap: 10px 40px;
+  margin: 14px 0 0;
+}
+
+.test-field dt {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.test-field dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.test-output {
+  margin-top: 16px;
+}
+
+.test-output-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 6px;
+}
+
+.test-output-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.test-output-meta {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-3);
+}
+
+.test-output-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.test-output-text {
+  max-height: 420px;
+}
+
+.test-output-text[data-expanded="true"] {
+  max-height: min(70vh, 720px);
+}
+
+.test-output-text[data-error="true"] {
+  color: var(--ink-2);
+}
+
+.test-output-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.test-output-note[data-tone="error"] {
+  color: var(--danger);
+}
+
+.test-output .test-output-note {
+  margin: 0 0 6px;
+}
+
+/* One grid for the whole list, so status words, times and links line up across rows. */
+.check-list {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  column-gap: 12px;
+  margin: 0;
+  padding: 4px 0;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-surface);
+  list-style: none;
+}
+
+.check-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  row-gap: 4px;
+  padding: 9px 14px;
+  font-size: 13.5px;
+}
+
+.check-row + .check-row {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+
+.check-icon {
+  color: var(--ink-3);
+}
+
+.check-row[data-tone="failed"] .check-icon,
+.check-row[data-tone="failed"] .check-word {
+  color: var(--danger);
+}
+
+.check-row[data-tone="passed"] .check-icon {
+  color: var(--green);
+}
+
+.check-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.check-name {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.check-app {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+/* Word and time are two grid columns on wide screens, one line under the name on phones. */
+.check-state {
+  display: contents;
+}
+
+.check-word {
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.check-time {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+.check-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+}
+
+.check-link:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
 }
 
 /* ------------------------------------------------------------------ notice page */
@@ -1754,5 +2795,90 @@ a.button {
 
   .jump-latest {
     bottom: 16px;
+  }
+
+  /* Tabs: as the board's segments, inactive tabs show their glyph; the word stays for
+     screen readers and the active tab shows it. */
+  .detail-tab {
+    padding: 6px 10px;
+  }
+
+  .detail-tab:not([aria-selected="true"]) .detail-tab-word,
+  .detail-tabbar .signal-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .panel-bar-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .diff-file-toggle {
+    flex-wrap: wrap;
+  }
+
+  .diff-file-counts {
+    margin-left: 23px;
+  }
+
+  .diff-table {
+    font-size: 11.5px;
+  }
+
+  .diff-gutter-col {
+    width: 4.5ch;
+  }
+
+  .diff-gutter {
+    padding: 0 0.6ch;
+  }
+
+  .shots-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shots-route-change {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .test-result {
+    padding: 14px 14px 16px;
+  }
+
+  .test-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .test-field-wide {
+    grid-column: 1 / -1;
+  }
+
+  .check-list {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .check-row {
+    padding: 10px 12px;
+  }
+
+  .check-state {
+    grid-column: 2;
+    display: flex;
+    gap: 10px;
+  }
+
+  .check-time {
+    text-align: left;
+  }
+
+  .check-row .check-link {
+    grid-column: 3;
+    grid-row: 1;
   }
 }

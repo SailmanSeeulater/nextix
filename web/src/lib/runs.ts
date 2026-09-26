@@ -5,6 +5,7 @@
 import {
   formatCost,
   formatElapsed,
+  formatSeconds,
   isHeartbeatStale,
   passFields,
   runWord,
@@ -86,8 +87,16 @@ export function laterTime(a: string | null, b: string | null): string | null {
 function mergeRun(next: RunDetail, prev: RunDetail | undefined): RunDetail {
   if (!prev) return next;
   const status = laterStatus(prev.status, next.status);
+  const base = status === next.status ? next : prev;
+  // The review fields follow the fresher copy too: a ticket read that started before the
+  // run ended must not wipe the tests and artifacts it finished with. Stream payloads
+  // leave them out (only a ticket read carries artifacts), so the other copy fills in.
+  const other = base === next ? prev : next;
   return {
-    ...(status === next.status ? next : prev),
+    ...base,
+    artifacts: base.artifacts ?? other.artifacts,
+    tests: base.tests !== undefined ? base.tests : other.tests,
+    review_errors: base.review_errors !== undefined ? base.review_errors : other.review_errors,
     last_heartbeat: laterTime(next.last_heartbeat, prev.last_heartbeat),
     input_tokens: Math.max(toNumber(next.input_tokens), toNumber(prev.input_tokens)),
     output_tokens: Math.max(toNumber(next.output_tokens), toNumber(prev.output_tokens)),
@@ -250,6 +259,16 @@ export function runFields(card: TicketCard, run: RunDetail | null, now: number):
       label: "Tokens",
       value: formatCount(input + output),
       detail: `${formatCount(input)} in · ${formatCount(output)} out`,
+    });
+  }
+
+  if (run.tests) {
+    const took = formatSeconds(toNumber(run.tests.duration_s));
+    fields.push({
+      label: "Tests",
+      value: run.tests.passed ? "Passed" : "Failed",
+      tone: run.tests.passed ? undefined : "alert",
+      detail: run.tests.passed ? took : `exit ${run.tests.exit_code} · ${took}`,
     });
   }
 

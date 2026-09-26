@@ -5,14 +5,29 @@ import {
   ArrowUpRight,
   ChevronRight,
   Clock,
+  FileDiff,
+  Images,
+  ListChecks,
   LoaderCircle,
+  type LucideIcon,
   RotateCcw,
+  ScrollText,
   Square,
   TriangleAlert,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from "react";
+import { hasScreenshots } from "@/lib/artifacts";
 import { COLUMNS, HEARTBEAT_RECHECK_INTERVAL_MS, heartbeatNeedsRecheck } from "@/lib/board";
+import { summarizeChecks } from "@/lib/checks";
 import { ApiError, cancelRun, loadTicketDetail, retryTicket } from "@/lib/client-api";
 import {
   activeRun,
@@ -29,11 +44,22 @@ import {
   upsertRun,
   type RunReadout,
 } from "@/lib/runs";
+import {
+  DETAIL_TABS,
+  availableTabs,
+  nextTab,
+  shownTab,
+  urlWithTab,
+  type DetailTab,
+} from "@/lib/tabs";
 import { toParagraphs, type Usage } from "@/lib/transcript";
 import type { Column, RunDetail, RunStateEvent, TicketCard, TicketDetail } from "@/lib/types";
+import { BeforeAfterPanel } from "./BeforeAfterPanel";
+import { ChecksPanel } from "./ChecksPanel";
 import { COLUMN_ICONS } from "./columnIcons";
+import { DiffPanel } from "./DiffPanel";
 import { ThemePicker } from "./ThemePicker";
-import { Transcript } from "./Transcript";
+import { StreamSignal, Transcript, type Connection } from "./Transcript";
 import { useNow } from "./useNow";
 
 const COLUMN_TITLES = Object.fromEntries(COLUMNS.map((c) => [c.key, c.title])) as Record<
@@ -58,7 +84,16 @@ function describe(err: unknown): string {
  * run's transcript. Live changes arrive on the board stream (ticket.updated, run.state)
  * and the run stream (run.updated, usage).
  */
-export function TicketView({ initial, renderedAt }: { initial: TicketDetail; renderedAt: number }) {
+export function TicketView({
+  initial,
+  renderedAt,
+  initialTab = "transcript",
+}: {
+  initial: TicketDetail;
+  renderedAt: number;
+  /** From `?tab=`, so a reload or a shared link opens on the same tab. */
+  initialTab?: DetailTab;
+}) {
   const ticketId = initial.id;
   const [detail, setDetail] = useState<TicketDetail>(() => ({
     ...initial,
@@ -106,6 +141,10 @@ export function TicketView({ initial, renderedAt }: { initial: TicketDetail; ren
       if (!card || card.id !== ticketId) return;
       const summary = card.latest_run;
       if (summary && mergeRunSummary(detailRef.current.runs, summary) === null) refresh();
+      // Between runs, an update is a PR or CI change (docs/phase4.md: check changes publish
+      // ticket.updated); the card doesn't carry checks or the PR head, so re-read the ticket.
+      // During a run, updates are mostly usage, and the run's end re-reads anyway.
+      else if (!activeRun(detailRef.current.runs)) refresh();
       setDetail((d) => {
         const next = mergeCard(d, card);
         const runs = summary ? mergeRunSummary(d.runs, summary) : null;
@@ -158,6 +197,48 @@ export function TicketView({ initial, renderedAt }: { initial: TicketDetail; ren
     lastRecheck.current = now;
     refresh();
   }, [active, now, refresh]);
+  // Tabs: the chosen one survives switching attempts; a run without screenshots shows
+  // the transcript instead of an empty Before / After, and switching back restores it.
+  const [chosenTab, setChosenTab] = useState<DetailTab>(initialTab);
+  const [opened, setOpened] = useState<ReadonlySet<DetailTab>>(() => new Set(["transcript"]));
+  const [connection, setConnection] = useState<Connection | null>(null);
+  /** Marks where the sticky tab bar sits in the page when it isn't stuck. */
+  const tabAnchorRef = useRef<HTMLDivElement>(null);
+  const artifacts = selected?.artifacts;
+  const reviewErrors = selected?.review_errors;
+  const hasScreens = useMemo(
+    () => hasScreenshots({ artifacts, review_errors: reviewErrors }),
+    [artifacts, reviewErrors],
+  );
+  const tabs = availableTabs(hasScreens);
+  const tab = shownTab(chosenTab, hasScreens);
+  const checksAlert =
+    selected?.tests?.passed === false || summarizeChecks(detail.checks?.runs ?? []).failed > 0;
+
+  function selectTab(next: DetailTab, focus = false) {
+    setOpened((prev) => (prev.has(next) && prev.has(tab) ? prev : new Set([...prev, tab, next])));
+    setChosenTab(next);
+    try {
+      window.history.replaceState(null, "", urlWithTab(window.location.href, next));
+    } catch {
+      // A sandboxed frame may refuse history changes; the tab still switches.
+    }
+    if (focus) document.getElementById(`tab-${next}`)?.focus();
+    // A reader deep in a long panel lands at the top of the next one, under the bar.
+    const anchor = tabAnchorRef.current;
+    if (anchor && next !== tab && anchor.getBoundingClientRect().top < 0) {
+      const top = anchor.getBoundingClientRect().top + window.scrollY;
+      requestAnimationFrame(() => window.scrollTo({ top, behavior: "instant" }));
+    }
+  }
+
+  function onTabKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const next = nextTab(tabs, tab, e.key);
+    if (!next) return;
+    e.preventDefault();
+    selectTab(next, true);
+  }
+
   const retryable = !removed && canRetry(detail.column, runs);
   const readout = runReadout(selected, now);
   const stalled = readout?.state === "stalled";
@@ -358,32 +439,144 @@ export function TicketView({ initial, renderedAt }: { initial: TicketDetail; ren
 
       {detail.body ? <IssueBody body={detail.body} /> : null}
 
-      {selected ? (
-        <Transcript
-          key={selected.id}
-          runId={selected.id}
-          status={selected.status}
-          noWorker={noWorkerAvailable(selected, now)}
-          onRunUpdated={onRunUpdated}
-          onUsage={onUsage}
-          onStreamTrouble={refresh}
-        />
-      ) : (
-        <section className="transcript" aria-labelledby="transcript-title">
-          <div className="transcript-bar">
-            <h2 className="transcript-title" id="transcript-title">
-              Transcript
-            </h2>
-          </div>
+      <div ref={tabAnchorRef} aria-hidden />
+      <div className="detail-tabbar">
+        <div
+          className="detail-tabs"
+          role="tablist"
+          aria-label="Ticket views"
+          onKeyDown={onTabKeyDown}
+        >
+          {tabs.map((id) => {
+            const TabIcon = TAB_ICONS[id];
+            const alert = id === "checks" && checksAlert;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                id={`tab-${id}`}
+                className="detail-tab"
+                aria-selected={tab === id}
+                aria-controls={`panel-${id}`}
+                tabIndex={tab === id ? 0 : -1}
+                data-alert={alert || undefined}
+                onClick={() => selectTab(id)}
+              >
+                {alert ? (
+                  <TriangleAlert size={15} strokeWidth={2.5} aria-hidden />
+                ) : (
+                  <TabIcon size={15} strokeWidth={2.25} aria-hidden />
+                )}
+                <span className="detail-tab-word">{TAB_TITLES[id]}</span>
+                {alert ? <span className="sr-only"> (failing)</span> : null}
+              </button>
+            );
+          })}
+        </div>
+        {connection ? <StreamSignal connection={connection} /> : null}
+      </div>
+
+      <div
+        className="detail-panel"
+        role="tabpanel"
+        id="panel-transcript"
+        aria-labelledby="tab-transcript"
+        hidden={tab !== "transcript"}
+        tabIndex={0}
+      >
+        {selected ? (
+          <Transcript
+            key={selected.id}
+            runId={selected.id}
+            status={selected.status}
+            noWorker={noWorkerAvailable(selected, now)}
+            visible={tab === "transcript"}
+            onRunUpdated={onRunUpdated}
+            onUsage={onUsage}
+            onStreamTrouble={refresh}
+            onConnection={setConnection}
+          />
+        ) : (
           <p className="transcript-empty">
             No agent has worked on this ticket yet.
             {retryable ? " Start a run to hand it to one." : ""}
           </p>
-        </section>
-      )}
+        )}
+      </div>
+
+      {/* Every shown tab's panel is in the DOM (so aria-controls always resolves); its
+          content mounts on first open, which is when the Diff and Checks load their data. */}
+      <div
+        className="detail-panel"
+        role="tabpanel"
+        id="panel-diff"
+        aria-labelledby="tab-diff"
+        hidden={tab !== "diff"}
+        tabIndex={0}
+      >
+        {opened.has("diff") || tab === "diff" ? (
+          <DiffPanel
+            ticketId={ticketId}
+            prNumber={detail.pr_number}
+            prUrl={detail.pr_url}
+            headSha={detail.pr_head_sha ?? null}
+          />
+        ) : null}
+      </div>
+
+      {selected && hasScreens ? (
+        <div
+          className="detail-panel"
+          role="tabpanel"
+          id="panel-before-after"
+          aria-labelledby="tab-before-after"
+          hidden={tab !== "before-after"}
+          tabIndex={0}
+        >
+          {opened.has("before-after") || tab === "before-after" ? (
+            <BeforeAfterPanel
+              key={selected.id}
+              artifacts={selected.artifacts}
+              reviewErrors={selected.review_errors}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      <div
+        className="detail-panel"
+        role="tabpanel"
+        id="panel-checks"
+        aria-labelledby="tab-checks"
+        hidden={tab !== "checks"}
+        tabIndex={0}
+      >
+        {opened.has("checks") || tab === "checks" ? (
+          <ChecksPanel
+            run={selected}
+            checks={detail.checks ?? null}
+            prNumber={detail.pr_number}
+            prHeadSha={detail.pr_head_sha ?? null}
+            now={now}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
+
+const TAB_TITLES = Object.fromEntries(DETAIL_TABS.map((t) => [t.id, t.title])) as Record<
+  DetailTab,
+  string
+>;
+
+const TAB_ICONS: Record<DetailTab, LucideIcon> = {
+  transcript: ScrollText,
+  diff: FileDiff,
+  "before-after": Images,
+  checks: ListChecks,
+};
 
 /** The header's primary field while a run is active, as on a Doing pass. */
 function HeaderReadout({ readout }: { readout: RunReadout }) {

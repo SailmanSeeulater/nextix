@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ArrowUpRight, Clock, TriangleAlert } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Clock, FlaskConical, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { COLUMNS, headerField, liveness, passFields } from "@/lib/board";
@@ -65,6 +65,13 @@ export function Pass({
         <span className="pass-title">{card.title}</span>
         <span className="sr-only">{`, ${COLUMN_TITLES[card.column]}`}</span>
         {live ? <Readout live={live} /> : null}
+        {card.tests_failing ? (
+          <span className="pass-flag">
+            <FlaskConical size={13} strokeWidth={2.5} aria-hidden />
+            <span className="sr-only">, </span>
+            Tests failing
+          </span>
+        ) : null}
       </button>
 
       <div className="pass-body" id={bodyId} inert={!open}>
