@@ -4,6 +4,9 @@ A ticketing system for coding agents. Describe a change; nexTix turns it into a
 structured GitHub issue, hands it to a Claude agent running in an isolated sandbox,
 shows live status on a kanban board, and opens a pull request for review.
 
+**New here? Read [docs/USER_GUIDE.md](docs/USER_GUIDE.md).** It covers setup, daily use,
+and troubleshooting. This README is the technical reference.
+
 **GitHub is the source of truth.** The board is a projection of GitHub state
 (issues, PRs, labels, merge status) kept in sync via webhooks. The database stores
 only what GitHub doesn't have: agent runs, logs, heartbeats, costs, and screenshots.
@@ -13,9 +16,9 @@ only what GitHub doesn't have: agent runs, logs, heartbeats, costs, and screensh
 ```
 backend/      FastAPI API, Celery worker + beat, SQLAlchemy models, Alembic migrations
 web/          Next.js (App Router) board and ticket review pages
-agent-image/  Sandbox Docker image + runner.py (Phase 3)
-cli/          `nextix` Typer CLI (Phase 2)
-docs/         e2e checklist and operational docs
+agent-image/  Sandbox Docker image + runner.py: one container per agent run
+cli/          `nextix` Typer CLI
+docs/         USER_GUIDE.md (start here), phase3.md (run lifecycle and contracts)
 ```
 
 ## Quick start (local, docker compose)
@@ -24,6 +27,7 @@ Prerequisites: Docker Desktop (or Docker Engine + Compose v2).
 
 ```bash
 cp .env.example .env
+docker compose build agent
 docker compose up --build
 ```
 
@@ -31,10 +35,12 @@ docker compose up --build
 |-----------|----------------------------------------------|
 | web       | http://localhost:3000 — the board (sign in with `NEXTIX_API_TOKEN`) |
 | api       | http://localhost:8000 — FastAPI, `/api/health`, `/docs` |
-| worker    | Celery worker (agent runs)                   |
-| beat      | Celery beat (heartbeat reaper, Phase 3)      |
-| postgres  | localhost:5432, user/pass/db `nextix`        |
-| redis     | localhost:6379                               |
+| worker    | Celery worker: housekeeping and the heartbeat reaper |
+| runner    | Celery worker for agent runs, one at a time; the only service with the Docker socket |
+| beat      | Celery beat (reaper every 30 s)              |
+| agent     | Build-only: the sandbox image `nextix-agent:latest` (`docker compose build agent`) |
+| postgres  | user/pass/db `nextix`; not published on the host (see below) |
+| redis     | not published on the host                    |
 
 The `api` container runs `alembic upgrade head` on start, so the schema is always current.
 
@@ -196,6 +202,32 @@ If triage says your plan's usage limit is reached, file tickets without triage u
 it resets. On the API-key path, refused requests are retried on Anthropic's
 recommended fallback model automatically.
 
+## Agent runs
+
+When a ticket is actionable (created from the CLI or web, or labeled `nextix` on GitHub
+by the repo owner or someone in `NEXTIX_ALLOWED_GITHUB_USERS`), a run is queued. The
+`runner` worker then:
+
+1. claims it and comments "🤖 Picked up by agent-xxxxxx";
+2. starts a sandbox container from `nextix-agent:latest` (uid 1000, no capabilities,
+   memory/CPU/process limits, no volumes, no Docker socket, on the `nextix_agents`
+   network, which reaches the API but not Postgres or Redis) with a **read-only** clone
+   token and exactly one Claude credential;
+3. streams the agent's messages and tool calls to the API through HMAC-signed callbacks,
+   so the ticket page shows a live transcript;
+4. after the container exits, copies out the branch bundle and pushes
+   `nextix/issue-<n>` itself with a separate write token (never forced, never another
+   branch), then opens or updates the PR with "Closes #n" and a link back to the board.
+
+If the agent needs information, it asks: the issue gets `nextix:needs-input` and the
+question as a comment. Reply, then remove the label (or press Retry); the next run gets
+the question and your reply. A run that stops sending heartbeats for 90 s is failed by
+the reaper. Details, contracts, and design decisions: [docs/phase3.md](docs/phase3.md).
+
+Limits per run come from `.env`: `AGENT_DEFAULT_TIMEOUT_MIN` (30),
+`AGENT_DEFAULT_MAX_COST_USD` (3), `AGENT_MAX_TURNS` (60), `AGENT_ALLOWED_TOOLS`,
+`AGENT_MEM_LIMIT`, `AGENT_CPUS`.
+
 ## Developing without compose
 
 Backend (Python 3.12):
@@ -207,7 +239,15 @@ pip install -e ".[dev]"
 ruff check . && ruff format --check . && mypy nextix && pytest
 ```
 
-Point `DATABASE_URL` / `REDIS_URL` at local services (or run just `docker compose up postgres redis`), then:
+Point `DATABASE_URL` / `REDIS_URL` at local services, or publish compose's on 127.0.0.1
+with the override file (compose doesn't publish them by default, because on Docker
+Desktop agent sandboxes can reach every port published on the host):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ports.yml up -d postgres redis
+```
+
+Then:
 
 ```bash
 alembic upgrade head
@@ -237,6 +277,9 @@ alembic upgrade head
 `.github/workflows/ci.yml` runs on every push and PR:
 
 - **backend**: ruff (lint + format), mypy (strict), pytest
+- **cli**: ruff, mypy, pytest
+- **agent-image**: ruff, mypy, pytest, `docker build`, and a check that Claude Code runs
+  inside as uid 1000
 - **web**: eslint, tsc, vitest
 - **compose-smoke**: builds the stack, waits for `api` to be healthy, curls `/api/health`
 
@@ -249,7 +292,7 @@ Built in phases; see the build spec.
 - [x] Phase 0: scaffolding, compose, CI
 - [x] Phase 1: GitHub App, webhooks, backfill, live read-only board
 - [x] Phase 2: ticket creation (`nextix new`, triage, needs-input)
-- [ ] Phase 3: agent runner end to end
+- [x] Phase 3: agent runner end to end
 - [ ] Phase 4: review surface (diff, screenshots, checks)
 - [ ] Phase 5: feedback loop
 - [ ] Phase 6: scale and extras
