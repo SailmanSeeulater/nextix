@@ -28,6 +28,7 @@ from nextix.events.stream import RedisPublisher
 from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.client import GitHubClient
 from nextix.runs.executor import RepoBusy, WorkerContext, execute_run, sweep_orphans
+from nextix.runs.lifecycle import start_pending_reviews
 from nextix.runs.push import GitBundlePusher
 from nextix.runs.reaper import reap
 from nextix.runs.sandbox import DockerSandbox, Sandbox
@@ -81,13 +82,18 @@ def _reaper_sandbox() -> Sandbox | None:
 
 async def _reap(sandbox: Sandbox | None) -> list[uuid.UUID]:
     async with worker_context(sandbox=sandbox) as ctx, ctx.sessions() as session:
-        return await reap(
+        reaped = await reap(
             session,
             gh=ctx.gh,
             publisher=ctx.publisher,
             sandbox=sandbox,
             now=datetime.now(UTC),
         )
+        # Reviews that arrived during a run which then ended off the normal path.
+        await start_pending_reviews(
+            session, gh=ctx.gh, publisher=ctx.publisher, enqueue=celery_enqueue
+        )
+        return reaped
 
 
 async def _sweep_on_start(sandbox: Sandbox) -> None:

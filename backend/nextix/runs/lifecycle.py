@@ -204,6 +204,19 @@ async def enqueue_run(
     """
     ticket_id = ticket.id
     existing = await active_run(session, ticket_id)
+    if existing is None and trigger == "retry" and review_id is None and task_title is None:
+        # Retrying a review_feedback run (Retry, Run again, or an answered question) means
+        # addressing the same review again, with the task snapshot it had.
+        latest = await session.scalar(
+            select(Run).where(Run.ticket_id == ticket_id).order_by(Run.attempt.desc()).limit(1)
+        )
+        if latest is not None and latest.review_id is not None:
+            trigger, review_id, review_meta = (
+                "review_feedback",
+                latest.review_id,
+                latest.review_meta,
+            )
+            task_title, task_body = latest.task_title, latest.task_body
     if existing:
         raise ActiveRunExists(existing)
     attempt = (
@@ -271,6 +284,30 @@ async def enqueue_run(
     return run
 
 
+async def start_pending_reviews(
+    session: AsyncSession, *, gh: GitHubClient, publisher: EventPublisher, enqueue: RunEnqueuer
+) -> list[uuid.UUID]:
+    """Every waiting review whose ticket has no active run any more, however that run
+    ended (cancelled, reaped, failed before its sandbox started). Run by the reaper."""
+    ticket_ids = list(
+        await session.scalars(select(Ticket.id).where(Ticket.pending_review_id.is_not(None)))
+    )
+    await session.commit()
+    started = []
+    for ticket_id in ticket_ids:
+        try:
+            run = await start_pending_review(
+                session, ticket_id, gh=gh, publisher=publisher, enqueue=enqueue
+            )
+        except Exception:
+            log.exception("could not start the pending review of ticket %s", ticket_id)
+            await session.rollback()
+            continue
+        if run is not None:
+            started.append(run.id)
+    return started
+
+
 async def start_pending_review(
     session: AsyncSession,
     ticket_id: uuid.UUID,
@@ -284,20 +321,28 @@ async def start_pending_review(
     if ticket is None or ticket.pending_review_id is None:
         return None
     review_id = ticket.pending_review_id
-    ticket.pending_review_id = None
-    await session.commit()
+    if await active_run(session, ticket.id) is not None:
+        return None  # still busy; it starts when that run ends
     repo = await session.get(Repo, ticket.repo_id)
-    if repo is None or ticket.pr_number is None or ticket.pr_state != "open":
-        return None
-    if ticket.issue_state != "open":
+    if (
+        repo is None
+        or ticket.pr_number is None
+        or ticket.pr_state != "open"
+        or ticket.issue_state != "open"
+    ):
+        ticket.pending_review_id = None  # nothing left to address
+        await session.commit()
         return None
     try:
         review = await gh.get_review(
             repo.installation_id, repo.owner, repo.name, ticket.pr_number, review_id
         )
     except Exception:
+        # Kept pending: the reaper tries again on its next beat.
         log.exception("could not read pending review %s", review_id)
         return None
+    ticket.pending_review_id = None
+    await session.commit()
     latest = await session.scalar(
         select(Run).where(Run.ticket_id == ticket.id).order_by(Run.attempt.desc()).limit(1)
     )

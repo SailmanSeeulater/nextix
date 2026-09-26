@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import secrets
+import socket
 import time
 import uuid
 from collections.abc import Callable
@@ -98,11 +99,21 @@ WORKER_BOOT_ID = uuid.uuid4().hex[:12]
 
 
 def sandbox_owner() -> str:
-    return f"{WORKER_BOOT_ID}:{os.getpid()}"
+    """ "<host>/<boot id>:<pid>": which runner container, which boot, which process."""
+    return f"{socket.gethostname()}/{WORKER_BOOT_ID}:{os.getpid()}"
+
+
+def owner_is_mine(owner: str) -> bool:
+    """Whether a sandbox belongs to this runner container (by hostname). Other runners on
+    the same Docker daemon sweep their own; unlabelled sandboxes (none since Phase 6) count
+    as ours."""
+    host, sep, _ = owner.partition("/")
+    return not sep or host == socket.gethostname()
 
 
 def owner_is_alive(owner: str) -> bool:
     """True while the process that started a sandbox (this worker boot) is still running."""
+    _, _, owner = owner.rpartition("/")
     boot, _, pid = owner.partition(":")
     if boot != WORKER_BOOT_ID or not pid.isdigit():
         return False
@@ -421,7 +432,22 @@ async def _claim(session: AsyncSession, run_id: uuid.UUID, ctx: WorkerContext) -
             Run.status.in_((RunStatus.CLAIMED, RunStatus.RUNNING)),
         )
     )
-    if (active or 0) >= ctx.settings.nextix_max_runs_per_repo:
+    # First come, first served: an older run for the repo still waiting goes first. Only
+    # recently queued ones count, so a run whose queue message was lost can't block the
+    # repo forever (the board flags it as "No worker available" after 10 minutes).
+    older_waiting = await session.scalar(
+        select(func.count())
+        .select_from(Run)
+        .join(Ticket, Ticket.id == Run.ticket_id)
+        .where(
+            Ticket.repo_id == repo_id,
+            Run.status == RunStatus.QUEUED,
+            Run.id != run.id,
+            Run.queued_at < run.queued_at,
+            Run.queued_at > func.now() - text("interval '10 minutes'"),
+        )
+    )
+    if (active or 0) >= ctx.settings.nextix_max_runs_per_repo or older_waiting:
         await session.rollback()
         raise RepoBusy(str(repo_id))
     run.agent_id = f"agent-{secrets.token_hex(3)}"
@@ -549,7 +575,7 @@ async def sweep_orphans(session: AsyncSession, ctx: WorkerContext) -> set[uuid.U
     labelled = {
         run_id: owner
         for run_id, owner in (await asyncio.to_thread(ctx.sandbox.labelled_runs)).items()
-        if not ctx.owner_alive(owner)
+        if owner_is_mine(owner) and not ctx.owner_alive(owner)
     }
     for run_id in labelled:
         log.warning("removing the unsupervised sandbox of run %s", run_id)
