@@ -73,6 +73,13 @@ def derive_column(ticket: TicketView, latest_run: RunView | None, pr: PrView | N
     return Column.TODO
 
 
+def is_trusted(login: str | None, repo: Repo, allowed: frozenset[str]) -> bool:
+    """The repo's owner, or someone listed in NEXTIX_ALLOWED_GITHUB_USERS (case-insensitive)."""
+    if not login:
+        return False
+    return login.lower() == repo.owner.lower() or login.lower() in {a.lower() for a in allowed}
+
+
 def is_on_board(ticket: Ticket, repo: Repo) -> bool:
     return repo.enabled and NEXTIX_LABEL in ticket.labels and ticket.issue_state != ISSUE_GONE
 

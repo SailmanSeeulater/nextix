@@ -102,32 +102,30 @@ async def handle_issues(
     result = DispatchResult(changed_tickets={ticket_id})
     if _asks_for_an_agent(payload, repo, issue):
         result.start_runs.add(ticket_id)
-        result.note = "labeled nextix by a trusted user: queueing a run"
+        result.note = "a trusted user asked for an agent: queueing a run"
     return result
 
 
-def is_trusted(login: str | None, repo: Repo) -> bool:
-    """The repo's owner, or someone listed in NEXTIX_ALLOWED_GITHUB_USERS."""
-    if not login:
-        return False
-    allowed = {u.lower() for u in get_settings().allowed_github_users}
-    return login.lower() == repo.owner.lower() or login.lower() in allowed
-
-
 def _asks_for_an_agent(payload: dict[str, Any], repo: Repo, issue: GhIssue) -> bool:
-    """`issues.labeled` with `nextix`, by a trusted person, on an open, answerable issue.
+    """A trusted person, on an open nextix issue, either labeled it `nextix` or removed
+    `nextix:needs-input` (meaning "I've answered, carry on").
 
     Issues the app itself labels (tickets created from the CLI or web) are queued by the API
-    directly; their webhooks come from the bot, which is not trusted here.
+    directly, and it removes needs-input itself when a run starts; those webhooks come from
+    the bot, which is not trusted here.
     """
+    action = payload.get("action")
     label = (payload.get("label") or {}).get("name")
     sender = (payload.get("sender") or {}).get("login")
+    started = (action == "labeled" and label == service.NEXTIX_LABEL) or (
+        action == "unlabeled" and label == service.NEEDS_INPUT_LABEL
+    )
     return (
-        payload.get("action") == "labeled"
-        and label == service.NEXTIX_LABEL
+        started
         and issue.state == "open"
+        and service.NEXTIX_LABEL in issue.label_names
         and service.NEEDS_INPUT_LABEL not in issue.label_names
-        and is_trusted(sender, repo)
+        and service.is_trusted(sender, repo, get_settings().allowed_github_users)
     )
 
 

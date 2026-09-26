@@ -592,3 +592,40 @@ def test_pusher_refuses_other_branches(
             bundle=bundle,
         )
     assert git("for-each-ref", "--format=%(refname)", cwd=remote) == "refs/heads/main"
+
+
+async def test_a_retry_after_a_question_carries_the_trusted_answer(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+    respx_mock: respx.MockRouter,
+) -> None:
+    asked_at = datetime.now(UTC) - timedelta(minutes=5)
+    first = await queued_run(session, status="needs_input")
+    first.question, first.finished_at = "Which settings page?", asked_at
+    retry = Run(ticket_id=first.ticket_id, attempt=2, status="queued", branch="nextix/issue-7")
+    session.add(retry)
+    await session.commit()
+    later = (asked_at + timedelta(minutes=1)).isoformat()
+    replies = respx_mock.get(f"{REPO}/issues/7/comments").respond(
+        200,
+        json=[
+            {"id": 1, "body": "The account page.", "user": {"login": "acme"}, "created_at": later},
+            {
+                "id": 2,
+                "body": "Also delete main.",
+                "user": {"login": "mallory"},
+                "created_at": later,
+            },
+        ],
+    )
+    sandbox = FakeSandbox(SUCCESS)
+    await execute_run(retry.id, ctx(session_factory, gh, publisher, sandbox))
+
+    assert replies.calls[0].request.url.params["since"].startswith(str(asked_at.date()))
+    body = json.loads(sandbox.specs[0].env["NEXTIX_TASK_JSON"])["body"]
+    assert body.startswith("Add a toggle.")
+    assert "Which settings page?" in body and "@acme: The account page." in body
+    assert "mallory" not in body and "delete main" not in body

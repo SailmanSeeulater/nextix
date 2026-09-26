@@ -32,7 +32,7 @@ from nextix.runs.lifecycle import record_transition
 from nextix.runs.push import BranchPusher, PushError
 from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, Sandbox, SandboxSpec
 from nextix.runs.state import TERMINAL_STATUSES, RunStatus
-from nextix.tickets.service import NEEDS_INPUT_LABEL
+from nextix.tickets.service import NEEDS_INPUT_LABEL, is_trusted
 
 log = logging.getLogger(__name__)
 
@@ -76,12 +76,21 @@ def claude_credential_env(settings: Settings) -> dict[str, str]:
 
 
 def sandbox_env(
-    *, settings: Settings, run: Run, ticket: Ticket, repo: Repo, clone_token: str
+    *,
+    settings: Settings,
+    run: Run,
+    ticket: Ticket,
+    repo: Repo,
+    clone_token: str,
+    clarification: str = "",
 ) -> dict[str, str]:
     """The complete environment contract from docs/phase3.md. Nothing else is passed."""
+    body = ticket.body or ""
+    if clarification:
+        body = f"{body}\n\n{clarification}" if body else clarification
     task = {
         "title": ticket.title,
-        "body": ticket.body or "",
+        "body": body,
         "extra_instructions": "",  # from .nextix.yml in Phase 4
         "review_comments": [],  # from PR reviews in Phase 5
     }
@@ -121,6 +130,55 @@ def pr_body(*, settings: Settings, run: Run, ticket: Ticket, result: RunResult) 
         "---\n"
         f"<sub>🤖 nexTix · {run.agent_id} · attempt {run.attempt} · "
         f"${result.cost_usd:.2f} · {tokens:,} tokens{duration}</sub>\n"
+    )
+
+
+async def clarification_for(
+    session: AsyncSession, run: Run, ticket: Ticket, repo: Repo, ctx: WorkerContext
+) -> str:
+    """If an earlier run asked a question, the question and the trusted people's replies.
+
+    Replies are issue comments from the repo owner or NEXTIX_ALLOWED_GITHUB_USERS posted
+    after that run finished; anyone else's comments are left out.
+    """
+    asked = await session.scalar(
+        select(Run)
+        .where(Run.ticket_id == ticket.id, Run.id != run.id, Run.question.is_not(None))
+        .order_by(Run.attempt.desc())
+        .limit(1)
+    )
+    if asked is None or not asked.question:
+        return ""
+    try:
+        comments = await ctx.gh.list_issue_comments(
+            repo.installation_id,
+            repo.owner,
+            repo.name,
+            ticket.issue_number,
+            since=asked.finished_at,
+        )
+    except Exception:
+        log.exception("could not read the answers on %s#%s", repo.full_name, ticket.issue_number)
+        comments = []
+    allowed = ctx.settings.allowed_github_users
+    answers = [
+        f"@{c.user.login}: {c.body.strip()}"
+        for c in comments
+        if c.user
+        and c.body
+        and c.body.strip()
+        and is_trusted(c.user.login, repo, allowed)
+        and (asked.finished_at is None or c.created_at >= asked.finished_at)
+    ]
+    reply = (
+        "\n\n".join(answers)
+        if answers
+        else "(No reply comment. The owner may have answered by editing the description above.)"
+    )
+    return (
+        "## Earlier question and answer\n\n"
+        f"A previous attempt stopped to ask:\n\n{asked.question}\n\n"
+        f"The answer:\n\n{reply}"
     )
 
 
@@ -261,6 +319,7 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
             clone_token = await ctx.gh.auth.scoped_token(
                 repo.installation_id, repository=repo.name, permissions={"contents": "read"}
             )
+            clarification = await clarification_for(session, run, ticket, repo, ctx)
             spec = SandboxSpec(
                 run_id=run.id,
                 image=ctx.settings.agent_image,
@@ -270,6 +329,7 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                     ticket=ticket,
                     repo=repo,
                     clone_token=clone_token,
+                    clarification=clarification,
                 ),
                 network=ctx.settings.agent_network or None,
                 mem_limit=ctx.settings.agent_mem_limit,

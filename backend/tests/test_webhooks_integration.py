@@ -436,3 +436,12 @@ async def test_labels_that_do_not_start_runs(
     r = await deliver(client, "issues", payload())
     assert r.status_code == 200
     assert enqueuer.run_ids == []
+
+
+async def test_owner_removing_needs_input_queues_a_run(
+    client: httpx.AsyncClient, enqueuer: FakeEnqueuer, comments_42: respx.Route
+) -> None:
+    payload = labeled_by("acme", labels=[{"name": "nextix"}])
+    payload["action"], payload["label"] = "unlabeled", {"name": "nextix:needs-input"}
+    await deliver(client, "issues", payload)
+    assert len(enqueuer.run_ids) == 1

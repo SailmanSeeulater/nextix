@@ -4,6 +4,7 @@ Unknown fields are ignored so GitHub can add fields without breaking us.
 The same models parse both webhook payloads and REST responses.
 """
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -53,6 +54,13 @@ class GhIssue(_Gh):
     @property
     def label_names(self) -> list[str]:
         return [label.name for label in self.labels]
+
+
+class GhComment(_Gh):
+    id: int
+    body: str | None = None
+    user: GhUser | None = None
+    created_at: datetime
 
 
 class GhRef(_Gh):

@@ -301,3 +301,25 @@ async def test_ticket_detail_and_event_paging(
     ).json()
     assert [e["payload"]["text"] for e in rest["events"]] == ["line 3", "line 4"]
     assert rest["next_after"] is None
+
+
+async def test_queueing_a_run_takes_the_ticket_out_of_needs_input(
+    session: AsyncSession,
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    enqueuer: FakeEnqueuer,
+    comments: respx.Route,
+    respx_mock: respx.MockRouter,
+) -> None:
+    ticket = await make_ticket(session)
+    ticket.labels = ["nextix", "nextix:needs-input"]
+    await session.commit()
+    removed = respx_mock.delete("/repos/acme/widgets/issues/7/labels/nextix%3Aneeds-input").respond(
+        200, json=[]
+    )
+    await enqueue_run(
+        session, ticket, trigger="retry", gh=gh, publisher=publisher, enqueue=enqueuer
+    )
+    assert removed.called
+    await session.refresh(ticket)
+    assert ticket.labels == ["nextix"]

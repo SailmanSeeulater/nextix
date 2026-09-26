@@ -20,7 +20,7 @@ from nextix.github.client import GitHubClient
 from nextix.redact import redact
 from nextix.runs.events import run_channel, store_events
 from nextix.runs.state import ACTIVE_STATUSES, RunStatus, apply_transition
-from nextix.tickets.service import BRANCH_PREFIX
+from nextix.tickets.service import BRANCH_PREFIX, NEEDS_INPUT_LABEL
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +143,23 @@ async def record_transition(
     await publish_ticket_changes(session, publisher, {run.ticket_id})
 
 
+async def _clear_needs_input(
+    session: AsyncSession, gh: GitHubClient, repo: Repo, ticket: Ticket
+) -> None:
+    """A new run means the question was answered: take the ticket out of Needs Input."""
+    try:
+        await gh.remove_label(
+            repo.installation_id, repo.owner, repo.name, ticket.issue_number, NEEDS_INPUT_LABEL
+        )
+    except Exception:
+        log.exception(
+            "could not remove %s from %s#%s", NEEDS_INPUT_LABEL, repo.full_name, ticket.issue_number
+        )
+        return
+    ticket.labels = [label for label in ticket.labels if label != NEEDS_INPUT_LABEL]
+    await session.commit()
+
+
 async def enqueue_run(
     session: AsyncSession,
     ticket: Ticket,
@@ -192,6 +209,8 @@ async def enqueue_run(
         text = _comment_for(run, RunStatus.QUEUED, None)
         if text:
             await _comment(gh, repo, ticket, text)
+        if NEEDS_INPUT_LABEL in ticket.labels:
+            await _clear_needs_input(session, gh, repo, ticket)
     try:
         enqueue(run.id)
     except Exception:

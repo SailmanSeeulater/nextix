@@ -6,13 +6,20 @@ which uses the app JWT to discover which installation covers a repo.
 
 import re
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
 from nextix.github.app_auth import GitHubAppAuth
-from nextix.github.schemas import GhInstallation, GhIssue, GhPullRequest, GhRepository
+from nextix.github.schemas import (
+    GhComment,
+    GhInstallation,
+    GhIssue,
+    GhPullRequest,
+    GhRepository,
+)
 
 _NEXT_LINK = re.compile(r'<([^>]+)>;\s*rel="next"')
 
@@ -200,6 +207,18 @@ class GitHubClient:
         await self._post(
             installation_id, f"/repos/{owner}/{name}/issues/{number}/comments", {"body": body}
         )
+
+    async def list_issue_comments(
+        self, installation_id: int, owner: str, name: str, number: int, *, since: datetime | None
+    ) -> list[GhComment]:
+        """Comments on an issue, oldest first; with ``since``, only those updated after it."""
+        params: dict[str, Any] = {"since": since.isoformat()} if since else {}
+        return [
+            GhComment.model_validate(item)
+            async for item in self._paginate(
+                installation_id, f"/repos/{owner}/{name}/issues/{number}/comments", params
+            )
+        ]
 
     async def list_file_paths(
         self, installation_id: int, owner: str, name: str, ref: str

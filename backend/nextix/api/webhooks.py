@@ -5,11 +5,12 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nextix.api.deps import get_enqueuer, get_github, get_publisher
 from nextix.config import Settings, get_settings
-from nextix.db.models import Ticket
+from nextix.db.models import Run, Ticket
 from nextix.db.session import get_db
 from nextix.events.stream import EventPublisher, publish_ticket_changes
 from nextix.github.client import GitHubClient
@@ -61,9 +62,17 @@ async def github_webhook(
         ticket = await session.get(Ticket, ticket_id)
         if ticket is None:
             continue
+        earlier = await session.scalar(
+            select(func.count()).select_from(Run).where(Run.ticket_id == ticket.id)
+        )
         try:
             await enqueue_run(
-                session, ticket, trigger="initial", gh=gh, publisher=publisher, enqueue=enqueue
+                session,
+                ticket,
+                trigger="retry" if earlier else "initial",
+                gh=gh,
+                publisher=publisher,
+                enqueue=enqueue,
             )
         except ActiveRunExists:
             log.info("ticket %s already has an active run", ticket_id)
