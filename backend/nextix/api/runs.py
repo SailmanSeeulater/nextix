@@ -178,6 +178,52 @@ async def retry_ticket(
     return run_detail(run)
 
 
+@router.post("/tickets/{ticket_id}/rerun", status_code=status.HTTP_201_CREATED)
+async def rerun_ticket(
+    ticket_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    gh: Annotated[GitHubClient, Depends(get_github)],
+    publisher: Annotated[EventPublisher, Depends(get_publisher)],
+    enqueue: Annotated[RunEnqueuer, Depends(get_enqueuer)],
+) -> dict[str, Any]:
+    """Cancel the active run, if any, and start a new one on the same branch (the board's
+    In Review -> Todo drag)."""
+    ticket = await session.get(Ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such ticket")
+    if ticket.issue_state != "open":
+        raise HTTPException(status.HTTP_409_CONFLICT, "the issue is closed; reopen it first")
+    active = await session.scalar(
+        select(Run)
+        .where(Run.ticket_id == ticket_id, Run.status.in_(ACTIVE_STATUSES))
+        .with_for_update()
+    )
+    if active is not None:
+        await record_transition(
+            session,
+            active,
+            RunStatus.CANCELLED,
+            gh=gh,
+            publisher=publisher,
+            exit_reason="cancelled",
+        )
+    ticket = await session.get(Ticket, ticket_id, populate_existing=True)
+    assert ticket is not None
+    try:
+        run = await enqueue_run(
+            session, ticket, trigger="retry", gh=gh, publisher=publisher, enqueue=enqueue
+        )
+    except ActiveRunExists as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"this ticket already has a {exc.run.status} run"
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "could not reach the job queue; try again"
+        ) from exc
+    return run_detail(run)
+
+
 @router.post("/runs/{run_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
 async def cancel_run(
     run_id: uuid.UUID,

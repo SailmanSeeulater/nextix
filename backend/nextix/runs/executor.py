@@ -38,7 +38,7 @@ from nextix.runs.config import (
     RunLimits,
     load_repo_config,
 )
-from nextix.runs.lifecycle import record_transition
+from nextix.runs.lifecycle import RunEnqueuer, record_transition, start_pending_review
 from nextix.runs.push import BranchPusher, PushError
 from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, Sandbox, SandboxSpec
 from nextix.runs.state import ACTIVE_STATUSES, TERMINAL_STATUSES, RunStatus
@@ -97,6 +97,8 @@ class WorkerContext:
     sandbox: Sandbox
     pusher: BranchPusher
     settings: Settings
+    # Queues follow-up runs (a review that arrived mid-run); None in tests that don't care.
+    enqueue: RunEnqueuer | None = None
     poll_interval_s: float = 2.0
     grace_s: float = 120.0
 
@@ -121,6 +123,7 @@ def sandbox_env(
     clarification: str = "",
     config: NextixConfig | None = None,
     limits: RunLimits | None = None,
+    review_comments: list[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     """The complete environment contract (docs/phase3.md and phase4.md). Nothing else is passed.
 
@@ -139,8 +142,9 @@ def sandbox_env(
         "title": title,
         "body": body,
         "extra_instructions": config.agent.extra_instructions or "",
-        "review_comments": [],  # from PR reviews in Phase 5
+        "review_comments": list(review_comments or []),
     }
+    task_json = fit_task(task)
     return {
         "NEXTIX_RUN_ID": str(run.id),
         "NEXTIX_CALLBACK_URL": (
@@ -152,7 +156,7 @@ def sandbox_env(
         "NEXTIX_BRANCH": run.branch or f"nextix/issue-{ticket.issue_number}",
         "NEXTIX_ISSUE_NUMBER": str(ticket.issue_number),
         # Unescaped UTF-8: a single environment variable must stay under Linux's 128 KiB.
-        "NEXTIX_TASK_JSON": json.dumps(task, ensure_ascii=False),
+        "NEXTIX_TASK_JSON": task_json,
         "NEXTIX_MODEL": settings.anthropic_model,
         "NEXTIX_MAX_TURNS": str(limits.max_turns),
         "NEXTIX_TIMEOUT_MIN": str(limits.timeout_min),
@@ -162,6 +166,76 @@ def sandbox_env(
         "GITHUB_TOKEN": clone_token,
         **claude_credential_env(settings),
     }
+
+
+# One environment variable must stay under Linux's 128 KiB; leave room for the rest.
+MAX_TASK_BYTES = 100_000
+MAX_REVIEW_COMMENTS = 50
+MAX_REVIEW_COMMENT_CHARS = 4000
+
+
+def fit_task(task: dict[str, Any]) -> str:
+    """NEXTIX_TASK_JSON, trimmed to MAX_TASK_BYTES.
+
+    Review comments are what a feedback run is about, so a long issue body is shortened
+    (to at most a third of the budget) before any comment is dropped; after that the last
+    comments go, and only then the rest of the body.
+    """
+    task = {**task, "review_comments": list(task.get("review_comments") or [])}
+
+    def size() -> int:
+        return len(json.dumps(task, ensure_ascii=False).encode())
+
+    def shorten_body() -> None:
+        body = task["body"].removesuffix(_CUT)
+        task["body"] = body[: len(body) * 3 // 4] + _CUT
+
+    while size() > MAX_TASK_BYTES and len(task["body"].encode()) > MAX_TASK_BYTES // 3:
+        shorten_body()
+    while size() > MAX_TASK_BYTES and task["review_comments"]:
+        task["review_comments"].pop()
+    while size() > MAX_TASK_BYTES and task["body"]:
+        shorten_body()
+    return json.dumps(task, ensure_ascii=False)
+
+
+_CUT = "\n\n… [cut: too long]"
+
+
+async def review_comments_for(
+    run: Run, ticket: Ticket, repo: Repo, ctx: WorkerContext
+) -> list[dict[str, Any]]:
+    """The review a review_feedback run answers: its body and inline comments."""
+    if run.review_id is None or ticket.pr_number is None:
+        return []
+    comments: list[dict[str, Any]] = []
+    try:
+        review = await ctx.gh.get_review(
+            repo.installation_id, repo.owner, repo.name, ticket.pr_number, run.review_id
+        )
+        inline = await ctx.gh.list_review_comments(
+            repo.installation_id, repo.owner, repo.name, ticket.pr_number, run.review_id
+        )
+    except Exception:
+        log.exception("could not read review %s for run %s", run.review_id, run.id)
+        return []
+    author = review.user.login if review.user else None
+    if (review.body or "").strip():
+        comments.append(
+            {"author": author, "body": redact(review.body or "")[:MAX_REVIEW_COMMENT_CHARS]}
+        )
+    for item in inline[:MAX_REVIEW_COMMENTS]:
+        if not (item.body or "").strip():
+            continue
+        comments.append(
+            {
+                "path": item.path,
+                "line": item.line or item.original_line,
+                "author": item.user.login if item.user else author,
+                "body": redact(item.body or "")[:MAX_REVIEW_COMMENT_CHARS],
+            }
+        )
+    return comments
 
 
 def tests_line(tests: dict[str, Any] | None) -> str | None:
@@ -518,6 +592,7 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                 repo.installation_id, repository=repo.name, permissions={"contents": "read"}
             )
             clarification = await clarification_for(session, run, ticket, repo, ctx)
+            review_comments = await review_comments_for(run, ticket, repo, ctx)
             spec = SandboxSpec(
                 run_id=run.id,
                 image=ctx.settings.agent_image,
@@ -530,6 +605,7 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                     clarification=clarification,
                     config=repo_config.config,
                     limits=limits,
+                    review_comments=review_comments,
                 ),
                 network=ctx.settings.agent_network or None,
                 mem_limit=ctx.settings.agent_mem_limit,
@@ -585,6 +661,20 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
         finally:
             if keep_alive:
                 keep_alive.cancel()
+        await _start_pending_review(session, run.ticket_id, ctx)
+
+
+async def _start_pending_review(
+    session: AsyncSession, ticket_id: uuid.UUID, ctx: WorkerContext
+) -> None:
+    if ctx.enqueue is None:
+        return
+    try:
+        await start_pending_review(
+            session, ticket_id, gh=ctx.gh, publisher=ctx.publisher, enqueue=ctx.enqueue
+        )
+    except Exception:
+        log.exception("could not queue the pending review of ticket %s", ticket_id)
 
 
 async def _record_usage(session: AsyncSession, run: Run, result: RunResult | None) -> None:
@@ -683,14 +773,19 @@ async def _conclude(
     ticket.updated_at = datetime.now(UTC)
     await session.commit()
     verb = "Opened" if created else "Updated"
+    reviewer = (run.review_meta or {}).get("author") if run.trigger == "review_feedback" else None
     await _finish(
         session,
         run,
         RunStatus.SUCCEEDED,
         ctx,
         comment=(
-            f"✅ {verb} PR #{pr['number']} from `{run.branch}` "
-            f"(${result.cost_usd:.2f}, {result.num_turns} turns)."
+            (
+                f"✅ Updated PR #{pr['number']} to address @{reviewer}'s review "
+                if reviewer
+                else f"✅ {verb} PR #{pr['number']} from `{run.branch}` "
+            )
+            + f"(${result.cost_usd:.2f}, {result.num_turns} turns)."
             + (f"\n\n{line}" if (line := tests_line(run.tests)) else "")
         ),
     )

@@ -73,6 +73,7 @@ class Ticket(Base):
     pr_head_sha: Mapped[str | None] = mapped_column(Text)
     checks_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     checks_error: Mapped[str | None] = mapped_column(Text)  # "forbidden" without Checks: read
+    pending_review_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -126,6 +127,8 @@ class Run(Base):
     last_batch: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     tests: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     review_errors: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    review_id: Mapped[int | None] = mapped_column(BigInteger)
+    review_meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     ticket: Mapped[Ticket] = relationship(back_populates="runs")
     events: Mapped[list["RunEvent"]] = relationship(back_populates="run", order_by="RunEvent.id")

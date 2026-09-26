@@ -20,6 +20,7 @@ from celery.signals import worker_ready
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from nextix.api.deps import celery_enqueue
 from nextix.celery_app import celery_app
 from nextix.config import get_settings
 from nextix.events.stream import RedisPublisher
@@ -52,6 +53,7 @@ async def worker_context(*, sandbox: Sandbox | None) -> AsyncIterator[WorkerCont
             sandbox=sandbox,  # type: ignore[arg-type]  # None only for the reaper
             pusher=GitBundlePusher(),
             settings=settings,
+            enqueue=celery_enqueue,
         )
     finally:
         await http.aclose()

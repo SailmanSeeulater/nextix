@@ -23,6 +23,8 @@ from nextix.github.schemas import (
     GhIssue,
     GhPullRequest,
     GhRepository,
+    GhReview,
+    GhReviewComment,
 )
 
 
@@ -321,6 +323,27 @@ class GitHubClient:
             installation_id, f"/repos/{owner}/{name}/commits/{sha}/status", {"per_page": 100}
         )
         return [GhCommitStatus.model_validate(s) for s in (data or {}).get("statuses") or []]
+
+    async def get_review(
+        self, installation_id: int, owner: str, name: str, number: int, review_id: int
+    ) -> GhReview:
+        data = await self._get(
+            installation_id, f"/repos/{owner}/{name}/pulls/{number}/reviews/{review_id}"
+        )
+        return GhReview.model_validate(data)
+
+    async def list_review_comments(
+        self, installation_id: int, owner: str, name: str, number: int, review_id: int
+    ) -> list[GhReviewComment]:
+        """The inline comments of one review, oldest first."""
+        return [
+            GhReviewComment.model_validate(item)
+            async for item in self._paginate(
+                installation_id,
+                f"/repos/{owner}/{name}/pulls/{number}/reviews/{review_id}/comments",
+                {},
+            )
+        ]
 
     # ------------------------------------------------------------------ runs
 

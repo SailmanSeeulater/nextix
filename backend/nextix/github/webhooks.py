@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nextix.config import get_settings
-from nextix.db.models import Repo, Ticket, WebhookDelivery
+from nextix.db.models import Repo, Run, Ticket, WebhookDelivery
 from nextix.github.client import GitHubClient
 from nextix.github.schemas import (
     GhCheckRun,
@@ -26,6 +26,7 @@ from nextix.github.schemas import (
     GhPullRequest,
     GhRepoRef,
     GhRepository,
+    GhReview,
 )
 from nextix.review.checks import sync_checks, tickets_for_check, upsert_check_run
 from nextix.tickets import service
@@ -54,13 +55,23 @@ async def record_delivery(
     return (await session.execute(stmt)).scalar_one_or_none() is not None
 
 
+@dataclass(frozen=True)
+class StartRun:
+    """A run a webhook asks for, queued once the handler's changes are committed."""
+
+    # The task exactly as the trusted person saw it when they asked (None: the ticket now).
+    task_title: str | None = None
+    task_body: str | None = None
+    trigger: str | None = None  # None: "initial" or "retry", from the ticket's history
+    review_id: int | None = None
+    review_meta: dict[str, Any] | None = None
+
+
 @dataclass
 class DispatchResult:
     changed_tickets: set[uuid.UUID] = field(default_factory=set)
     note: str = "ok"
-    # Tickets that should get a run queued once the handler's changes are committed, with
-    # the task (title, body) exactly as the trusted person saw it when they asked.
-    start_runs: dict[uuid.UUID, tuple[str, str]] = field(default_factory=dict)
+    start_runs: dict[uuid.UUID, StartRun] = field(default_factory=dict)
 
 
 Handler = Callable[[dict[str, Any], AsyncSession, GitHubClient], Awaitable[DispatchResult]]
@@ -104,7 +115,7 @@ async def handle_issues(
     ticket_id = await service.upsert_ticket_from_issue(session, repo, issue, created_via="github")
     result = DispatchResult(changed_tickets={ticket_id})
     if _asks_for_an_agent(payload, repo, issue):
-        result.start_runs[ticket_id] = (issue.title, issue.body or "")
+        result.start_runs[ticket_id] = StartRun(issue.title, issue.body or "")
         result.note = "a trusted user asked for an agent: queueing a run"
     return result
 
@@ -129,6 +140,103 @@ def _asks_for_an_agent(payload: dict[str, Any], repo: Repo, issue: GhIssue) -> b
         and service.NEXTIX_LABEL in issue.label_names
         and service.NEEDS_INPUT_LABEL not in issue.label_names
         and service.is_trusted(sender, repo, get_settings().allowed_github_users)
+    )
+
+
+def _trusted(login: str | None, repo: Repo) -> bool:
+    """Trusted people only; the app's own bot never triggers anything."""
+    settings = get_settings()
+    if login and login.lower() == settings.github_bot_login.lower():
+        return False
+    return service.is_trusted(login, repo, settings.allowed_github_users)
+
+
+async def handle_issue_comment(
+    payload: dict[str, Any], session: AsyncSession, gh: GitHubClient
+) -> DispatchResult:
+    """A trusted person answering the agent's (or triage's) question starts a new run."""
+    repo = await _repo_from_event(payload, session)
+    if repo is None:
+        return DispatchResult(note="repo disabled or unknown")
+    issue = GhIssue.model_validate(payload["issue"])
+    if payload.get("action") != "created" or issue.pull_request is not None:
+        return DispatchResult(note="not a new issue comment")
+    ticket = await service.get_ticket(session, repo, issue.number)
+    if ticket is None:
+        return DispatchResult(note="not a nextix issue")
+    author = ((payload.get("comment") or {}).get("user") or {}).get("login")
+    waiting = service.NEEDS_INPUT_LABEL in issue.label_names
+    if not waiting or issue.state != "open" or not _trusted(author, repo):
+        return DispatchResult(note="comment doesn't answer a question")
+    return DispatchResult(
+        changed_tickets={ticket.id},
+        note=f"@{author} answered the question: queueing a run",
+        start_runs={ticket.id: StartRun()},
+    )
+
+
+# Review states (webhooks send them in lower case) that ask for changes.
+_FEEDBACK_STATES = {"changes_requested", "commented"}
+
+
+async def handle_pull_request_review(
+    payload: dict[str, Any], session: AsyncSession, gh: GitHubClient
+) -> DispatchResult:
+    """A trusted reviewer asking for changes on a nextix PR starts a review_feedback run."""
+    repo = await _repo_from_event(payload, session)
+    if repo is None:
+        return DispatchResult(note="repo disabled or unknown")
+    if payload.get("action") != "submitted":
+        return DispatchResult(note=f"ignored pull_request_review.{payload.get('action')}")
+    pr = GhPullRequest.model_validate(payload["pull_request"])
+    review = GhReview.model_validate(payload["review"])
+    number = service.issue_number_from_branch(pr.head.ref)
+    if number is None or pr.head.repo is None or pr.head.repo.full_name != repo.full_name:
+        return DispatchResult(note="not a nextix branch")
+    ticket = await service.get_ticket(session, repo, number)
+    if ticket is None:
+        return DispatchResult(note="not a nextix ticket")
+    author = review.user.login if review.user else None
+    state = review.state.lower()
+    if not _trusted(author, repo) or state not in _FEEDBACK_STATES:
+        return DispatchResult(note=f"review ({state}) doesn't ask for changes")
+    if pr.state != "open" or ticket.issue_state != "open":
+        return DispatchResult(note="the PR or issue is closed")
+    comments = 0
+    if not (review.body or "").strip() or state == "commented":
+        try:
+            comments = len(
+                await gh.list_review_comments(
+                    repo.installation_id, repo.owner, repo.name, pr.number, review.id
+                )
+            )
+        except Exception:
+            log.exception("could not read the comments of review %s", review.id)
+        if not (review.body or "").strip() and comments == 0:
+            return DispatchResult(note="an empty review")
+    latest = await session.scalar(
+        select(Run).where(Run.ticket_id == ticket.id).order_by(Run.attempt.desc()).limit(1)
+    )
+    meta = {
+        "id": review.id,
+        "author": author,
+        "state": state,
+        "html_url": review.html_url,
+        "comments": comments,
+    }
+    return DispatchResult(
+        changed_tickets={ticket.id},
+        note=f"@{author} reviewed ({state}): queueing a feedback run",
+        start_runs={
+            ticket.id: StartRun(
+                # The task the owner approved last time, not whatever the issue says now.
+                task_title=latest.task_title if latest else None,
+                task_body=latest.task_body if latest else None,
+                trigger="review_feedback",
+                review_id=review.id,
+                review_meta=meta,
+            )
+        },
     )
 
 
@@ -237,6 +345,8 @@ async def handle_installation_repositories(
 HANDLERS: dict[str, Handler] = {
     "issues": handle_issues,
     "pull_request": handle_pull_request,
+    "pull_request_review": handle_pull_request_review,
+    "issue_comment": handle_issue_comment,
     "check_run": handle_check_run,
     "check_suite": handle_check_suite,
     "installation": handle_installation,

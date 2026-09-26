@@ -58,7 +58,7 @@ async def github_webhook(
 
     log.info("webhook %s %s.%s: %s", delivery_id, event, action, result.note)
     await publish_ticket_changes(session, publisher, result.changed_tickets)
-    for ticket_id, (task_title, task_body) in result.start_runs.items():
+    for ticket_id, start in result.start_runs.items():
         ticket = await session.get(Ticket, ticket_id)
         if ticket is None:
             continue
@@ -69,15 +69,23 @@ async def github_webhook(
             await enqueue_run(
                 session,
                 ticket,
-                trigger="retry" if earlier else "initial",
+                trigger=start.trigger or ("retry" if earlier else "initial"),
                 gh=gh,
                 publisher=publisher,
                 enqueue=enqueue,
-                task_title=task_title,
-                task_body=task_body,
+                task_title=start.task_title,
+                task_body=start.task_body,
+                review_id=start.review_id,
+                review_meta=start.review_meta,
             )
         except ActiveRunExists:
-            log.info("ticket %s already has an active run", ticket_id)
+            if start.review_id is not None:
+                # Busy: the review is picked up as soon as the active run finishes.
+                ticket.pending_review_id = start.review_id
+                await session.commit()
+                log.info("ticket %s is busy; review %s is pending", ticket_id, start.review_id)
+            else:
+                log.info("ticket %s already has an active run", ticket_id)
         except Exception:
             log.exception("could not queue a run for ticket %s", ticket_id)
     return {"status": "ok", "note": result.note, "tickets": len(result.changed_tickets)}

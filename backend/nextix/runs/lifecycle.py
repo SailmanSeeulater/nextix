@@ -63,6 +63,7 @@ def run_detail(run: Run) -> dict[str, Any]:
         "question": run.question,
         "tests": run.tests,
         "review_errors": run.review_errors or [],
+        "review": run.review_meta,
     }
 
 
@@ -188,6 +189,8 @@ async def enqueue_run(
     enqueue: RunEnqueuer,
     task_title: str | None = None,
     task_body: str | None = None,
+    review_id: int | None = None,
+    review_meta: dict[str, Any] | None = None,
 ) -> Run:
     """Create a queued run for `ticket` and hand it to the worker.
 
@@ -217,6 +220,8 @@ async def enqueue_run(
         queued_at=datetime.now(UTC),
         task_title=ticket.title if task_title is None else task_title,
         task_body=(ticket.body or "") if task_body is None else task_body,
+        review_id=review_id,
+        review_meta=review_meta,
     )
     try:
         # A savepoint, so losing a race rolls back only this insert and nothing else in
@@ -235,6 +240,11 @@ async def enqueue_run(
     repo = await session.get(Repo, ticket.repo_id)
     if repo:
         text = _comment_for(run, RunStatus.QUEUED, None)
+        reviewer = (review_meta or {}).get("author")
+        if text and reviewer:
+            text = (
+                f"🕒 Queued for an agent (attempt {run.attempt}) to address @{reviewer}'s review."
+            )
         if text:
             await _comment(gh, repo, ticket, text)
         if NEEDS_INPUT_LABEL in ticket.labels:
@@ -258,3 +268,59 @@ async def enqueue_run(
     await publish_run(publisher, run)
     await publish_ticket_changes(session, publisher, {ticket.id})
     return run
+
+
+async def start_pending_review(
+    session: AsyncSession,
+    ticket_id: uuid.UUID,
+    *,
+    gh: GitHubClient,
+    publisher: EventPublisher,
+    enqueue: RunEnqueuer,
+) -> Run | None:
+    """Queue the feedback run for a review that arrived while another run was active."""
+    ticket = await session.get(Ticket, ticket_id, populate_existing=True)
+    if ticket is None or ticket.pending_review_id is None:
+        return None
+    review_id = ticket.pending_review_id
+    ticket.pending_review_id = None
+    await session.commit()
+    repo = await session.get(Repo, ticket.repo_id)
+    if repo is None or ticket.pr_number is None or ticket.pr_state != "open":
+        return None
+    if ticket.issue_state != "open":
+        return None
+    try:
+        review = await gh.get_review(
+            repo.installation_id, repo.owner, repo.name, ticket.pr_number, review_id
+        )
+    except Exception:
+        log.exception("could not read pending review %s", review_id)
+        return None
+    latest = await session.scalar(
+        select(Run).where(Run.ticket_id == ticket.id).order_by(Run.attempt.desc()).limit(1)
+    )
+    meta = {
+        "id": review.id,
+        "author": review.user.login if review.user else None,
+        "state": review.state.lower(),
+        "html_url": review.html_url,
+        "comments": None,
+    }
+    try:
+        return await enqueue_run(
+            session,
+            ticket,
+            trigger="review_feedback",
+            gh=gh,
+            publisher=publisher,
+            enqueue=enqueue,
+            task_title=latest.task_title if latest else None,
+            task_body=latest.task_body if latest else None,
+            review_id=review.id,
+            review_meta=meta,
+        )
+    except ActiveRunExists:
+        ticket.pending_review_id = review_id  # still busy; try again after that run
+        await session.commit()
+        return None

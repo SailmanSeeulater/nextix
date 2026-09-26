@@ -77,6 +77,27 @@ class GhCheckSuiteRef(_Gh):
     head_branch: str | None = None
 
 
+class GhReview(_Gh):
+    """A pull request review (webhook `review` object or REST)."""
+
+    id: int
+    user: GhUser | None = None
+    state: str  # APPROVED | CHANGES_REQUESTED | COMMENTED | DISMISSED | PENDING (REST, upper)
+    body: str | None = None
+    html_url: str | None = None
+
+
+class GhReviewComment(_Gh):
+    """An inline comment that belongs to a review."""
+
+    id: int
+    path: str | None = None
+    line: int | None = None
+    original_line: int | None = None
+    body: str | None = None
+    user: GhUser | None = None
+
+
 class GhCommitStatus(_Gh):
     context: str
     state: str  # pending | success | failure | error
