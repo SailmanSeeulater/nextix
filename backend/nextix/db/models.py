@@ -173,6 +173,20 @@ class CheckRun(Base):
     )
 
 
+class CommitStatus(Base):
+    """A commit status (the pre-checks CI API), mirrored from GitHub on demand."""
+
+    __tablename__ = "commit_statuses"
+
+    repo_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repos.id"), primary_key=True)
+    sha: Mapped[str] = mapped_column(Text, primary_key=True)
+    context: Mapped[str] = mapped_column(Text, primary_key=True)
+    state: Mapped[str] = mapped_column(Text, nullable=False)  # pending|success|failure|error
+    target_url: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class WebhookDelivery(Base):
     """One row per processed GitHub delivery (X-GitHub-Delivery), for dedupe."""
 

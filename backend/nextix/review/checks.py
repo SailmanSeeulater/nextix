@@ -8,6 +8,7 @@ it GitHub answers 403 and the ticket remembers `checks_error = "forbidden"`.
 
 import logging
 import uuid
+import zlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nextix.db.models import CheckRun, Repo, Ticket
+from nextix.db.models import CheckRun, CommitStatus, Repo, Ticket
 from nextix.github.client import GitHubClient
 from nextix.github.schemas import GhCheckRun
 from nextix.tickets.service import issue_number_from_branch
@@ -91,7 +92,42 @@ async def sync_checks(
     for check in checks:
         await upsert_check_run(session, repo, check)
     ticket.checks_error = None
+    await _sync_statuses(session, gh, repo, sha)
     await session.commit()
+
+
+async def _sync_statuses(session: AsyncSession, gh: GitHubClient, repo: Repo, sha: str) -> None:
+    """Commit statuses (the older CI API some services still use) for the same commit."""
+    try:
+        statuses = await gh.list_commit_statuses(repo.installation_id, repo.owner, repo.name, sha)
+    except Exception as exc:  # best effort: check runs are the main signal
+        log.warning("could not read commit statuses for %s@%s: %s", repo.full_name, sha[:7], exc)
+        return
+    for status in statuses:
+        values: dict[str, Any] = {
+            "state": status.state,
+            "target_url": status.target_url,
+            "description": (status.description or "")[:500] or None,
+            "updated_at": status.updated_at,
+        }
+        stmt = insert(CommitStatus).values(
+            repo_id=repo.id, sha=sha, context=status.context[:200], **values
+        )
+        await session.execute(
+            stmt.on_conflict_do_update(
+                index_elements=[CommitStatus.repo_id, CommitStatus.sha, CommitStatus.context],
+                set_=values,
+            )
+        )
+
+
+# A commit status shown as a check run: pending is running, error counts as failure.
+_STATUS_AS_CHECK: dict[str, tuple[str, str | None]] = {
+    "pending": ("in_progress", None),
+    "success": ("completed", "success"),
+    "failure": ("completed", "failure"),
+    "error": ("completed", "failure"),
+}
 
 
 async def checks_json(session: AsyncSession, ticket: Ticket) -> dict[str, Any]:
@@ -118,6 +154,30 @@ async def checks_json(session: AsyncSession, ticket: Ticket) -> dict[str, Any]:
                     "app_name": row.app_name,
                     "started_at": row.started_at.isoformat() if row.started_at else None,
                     "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                }
+            )
+        statuses = await session.scalars(
+            select(CommitStatus)
+            .where(CommitStatus.repo_id == ticket.repo_id, CommitStatus.sha == ticket.pr_head_sha)
+            .order_by(CommitStatus.context)
+        )
+        for status in statuses:
+            if status.context in seen:
+                continue
+            state, conclusion = _STATUS_AS_CHECK.get(status.state, ("completed", "neutral"))
+            runs.append(
+                {
+                    # Negative, so it can never clash with a GitHub check run id.
+                    "id": -(zlib.crc32(status.context.encode()) + 1),
+                    "name": status.context,
+                    "status": state,
+                    "conclusion": conclusion,
+                    "html_url": status.target_url,
+                    "app_name": "Commit status",
+                    "started_at": None,
+                    "completed_at": (
+                        status.updated_at.isoformat() if status.updated_at and conclusion else None
+                    ),
                 }
             )
     return {"connected": ticket.checks_error != FORBIDDEN, "runs": runs}

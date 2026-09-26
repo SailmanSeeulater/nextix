@@ -283,3 +283,31 @@ async def test_a_completed_check_suite_rereads_the_runs(
     await client.post("/api/github/webhook", **signed("check_suite", payload))
     assert route.called
     assert (await session.scalars(select(CheckRun.name))).all() == ["e2e"]
+
+
+async def test_commit_statuses_show_up_as_checks(
+    client: httpx.AsyncClient, session: AsyncSession, respx_mock: respx.MockRouter
+) -> None:
+    _, ticket, _ = await seed(session)
+    respx_mock.get(f"{REPO}/commits/{SHA}/check-runs").respond(
+        200, json={"total_count": 0, "check_runs": []}
+    )
+    respx_mock.get(f"{REPO}/commits/{SHA}/status").respond(
+        200,
+        json={
+            "state": "failure",
+            "statuses": [
+                {"context": "vercel", "state": "success", "target_url": "https://v.example"},
+                {"context": "ci/circleci", "state": "error", "description": "Build errored"},
+                {"context": "coverage", "state": "pending"},
+            ],
+        },
+    )
+    detail = (await client.get(f"/api/tickets/{ticket.id}", headers=AUTH)).json()
+    got = {c["name"]: (c["status"], c["conclusion"]) for c in detail["checks"]["runs"]}
+    assert got == {
+        "vercel": ("completed", "success"),
+        "ci/circleci": ("completed", "failure"),
+        "coverage": ("in_progress", None),
+    }
+    assert all(c["id"] < 0 and c["app_name"] == "Commit status" for c in detail["checks"]["runs"])

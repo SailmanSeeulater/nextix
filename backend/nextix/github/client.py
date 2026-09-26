@@ -18,6 +18,7 @@ from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.schemas import (
     GhCheckRun,
     GhComment,
+    GhCommitStatus,
     GhInstallation,
     GhIssue,
     GhPullRequest,
@@ -311,6 +312,15 @@ class GitHubClient:
                 items_key="check_runs",
             )
         ]
+
+    async def list_commit_statuses(
+        self, installation_id: int, owner: str, name: str, sha: str
+    ) -> list[GhCommitStatus]:
+        """The latest status per context on a commit (the combined status)."""
+        data = await self._get(
+            installation_id, f"/repos/{owner}/{name}/commits/{sha}/status", {"per_page": 100}
+        )
+        return [GhCommitStatus.model_validate(s) for s in (data or {}).get("statuses") or []]
 
     # ------------------------------------------------------------------ runs
 

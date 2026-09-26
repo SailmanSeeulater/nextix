@@ -38,6 +38,17 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_check_runs_repo_head", "check_runs", ["repo_id", "head_sha"])
+    # Commit statuses: the older CI signal (Vercel, CircleCI, ...), one row per context.
+    op.create_table(
+        "commit_statuses",
+        sa.Column("repo_id", sa.Uuid(), sa.ForeignKey("repos.id"), primary_key=True),
+        sa.Column("sha", sa.Text(), primary_key=True),
+        sa.Column("context", sa.Text(), primary_key=True),
+        sa.Column("state", sa.Text(), nullable=False),
+        sa.Column("target_url", sa.Text(), nullable=True),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+    )
     # The commit an open PR currently points at: CI status is shown for this sha.
     op.add_column("tickets", sa.Column("pr_head_sha", sa.Text(), nullable=True))
     # When check runs were last read from GitHub, and why that failed if it did
@@ -59,5 +70,6 @@ def downgrade() -> None:
     op.drop_column("tickets", "checks_error")
     op.drop_column("tickets", "checks_synced_at")
     op.drop_column("tickets", "pr_head_sha")
+    op.drop_table("commit_statuses")
     op.drop_index("ix_check_runs_repo_head", table_name="check_runs")
     op.drop_table("check_runs")

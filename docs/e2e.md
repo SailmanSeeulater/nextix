@@ -56,3 +56,48 @@ Setup: `ANTHROPIC_API_KEY` set in `.env`, `docker compose up -d`, `pip install -
 - [ ] A ticket that changes state on GitHub slides from one stack to the other without a reload
 - [ ] The palette button lists 15 themes; picking one recolors the board immediately and survives a reload
 - [ ] At phone width, a segmented switcher shows all six states with counts
+
+## Phase 3 (agent runs)
+
+Setup: `docker compose build agent`, `docker compose up -d`, a Claude credential in `.env`,
+smee running, and a test repo with at least one commit on its default branch.
+
+- [ ] Filing an actionable ticket from the board posts "Queued", "Picked up by agent-…",
+      and "started working on `nextix/issue-<n>`" on the issue within seconds
+- [ ] The ticket page (Details) streams the agent's messages and tool calls live
+- [ ] A small change (e.g. "add a CONTRIBUTING.md") ends in "✅ Opened PR #…", and the
+      card moves to **In Review**; the PR is from `nextix/issue-<n>`, says "Closes #<n>",
+      and links back to the board
+- [ ] `docker kill` on the running `nextix-run-…` container moves the ticket to **Failed**
+      with a comment within 90 s; **Retry** starts attempt 2 on the same branch
+- [ ] **Cancel run** while the agent works: "🛑 Run cancelled", the container is gone,
+      nothing is pushed
+- [ ] A ticket whose request the agent can't act on ends in **Needs Input** with its
+      question on the issue; replying and removing `nextix:needs-input` starts a new run
+      that sees the reply
+- [ ] Restarting the runner (`docker compose restart runner`) mid-run fails that run
+      with "the runner restarted mid-run" and removes its container
+- [ ] `docker ps -a --filter label=nextix.run_id` is empty once runs finish
+
+## Phase 4 (review surface)
+
+Setup: the GitHub App has **Checks: Read** and the Check run / Check suite events.
+
+Backend-only repo (a `.nextix.yml` with `test:` and no `app:`):
+
+- [ ] A ticket for a small code change opens a PR whose body says
+      "✅ Tests passed: `npm test`" (or "❌ Tests failed" with the exit code)
+- [ ] The ticket page shows **Transcript**, **Diff**, and **Checks** tabs and no
+      **Before / After** tab; Diff shows the PR's files; Checks shows the test output
+- [ ] Breaking `.nextix.yml` on the default branch (e.g. `agent: {timeout_min: 999}`) makes
+      the next run fail at once with the validation errors in the comment
+
+UI repo (a `.nextix.yml` with `setup`, `test`, and an `app:` section with screenshot routes):
+
+- [ ] A visual ticket (e.g. "make the home page heading dark blue") shows a
+      **Before / After** tab with one section per route: side by side, the slider, and a
+      diff image whose highlighted pixels match the change
+- [ ] Routes the change doesn't touch report "No visible change"
+- [ ] The PR body lists each route with the percentage of pixels changed
+- [ ] A CI workflow on the repo shows its check runs in **Checks**, updating when they finish
+- [ ] A board card whose latest run's tests failed shows the "tests failing" marker

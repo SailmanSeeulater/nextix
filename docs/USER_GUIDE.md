@@ -259,6 +259,50 @@ ignored. You can also answer by editing the issue description instead.
 - **Cancel run** appears while a run is active. You'll be asked to confirm; the agent's
   container is stopped within a few seconds and nothing is pushed.
 
+### Tell nexTix how to build your repo (`.nextix.yml`)
+
+Add a `.nextix.yml` file to the root of a repo to have every run install dependencies,
+run your tests, and take screenshots. Commit it to the **default branch** (`main`):
+that's the only copy nexTix reads, so an agent can't loosen its own limits by editing it.
+
+A repo with tests but no web UI:
+
+```yaml
+test: npm test
+```
+
+A web app, with screenshots of two pages:
+
+```yaml
+setup:
+  - npm ci
+test: npm test
+app:
+  start: npx next dev --port 3000 --hostname 127.0.0.1
+  port: 3000
+  screenshots:
+    - path: /
+    - path: /settings
+```
+
+What each part does:
+
+- **`setup`**: commands run before the agent starts (and again after, if it changed
+  your dependencies), so the agent can run your tests while it works.
+- **`test`**: run after the agent finishes. The result appears on the ticket page, in
+  the pull request, and in the closing comment. Failing tests never stop the PR; they're
+  just shown clearly, and the board pass gets a "tests failing" marker.
+- **`app`**: how to start your app. nexTix screenshots each `path` on `main` before the
+  agent starts and again after it finishes, and highlights every pixel that changed.
+  `ready_timeout_s` (default 90) is how long to wait for the app to answer.
+- **`agent`** (optional): `max_turns`, `timeout_min` (up to 120), `max_cost_usd`,
+  `allowed_tools`, and `extra_instructions` (house rules the agent should follow) for
+  this repo, overriding the defaults below.
+
+If the file has a mistake, the next run stops straight away and the issue comment lists
+exactly what's wrong (for example `agent.timeout_min: Input should be less than or equal
+to 120`). Fix it on `main` and press **Retry**.
+
 ### Limits on each run
 
 | Limit | Default | Setting |
@@ -292,6 +336,7 @@ saved in the browser.
 | **❌ Failed: pushing the branch failed** | Someone pushed to `nextix/issue-N` in a way the agent's work can't sit on top of | Close the PR, delete the branch on GitHub, **Retry** |
 | **❌ Failed: the sandbox could not start or crashed** | The agent image is missing, Docker had a problem, or the container was stopped from outside (e.g. in Docker Desktop) | `docker compose build agent` if the image is missing, then **Retry** |
 | **❌ Failed: …has no commits yet** | The repository is empty, so there's nothing to branch from | Push a first commit (a README is enough), then **Retry** |
+| **❌ Failed: `.nextix.yml` on `main` can't be used** | The file has a typo, an unknown key, or a value out of range | The comment lists each problem. Fix the file on `main`, then **Retry** |
 | **⏱️ Timed out** | The run hit its time limit | Split the ticket into smaller ones, or raise `AGENT_DEFAULT_TIMEOUT_MIN` |
 | Labels or merges on GitHub don't show on the board | Webhooks aren't arriving | Start smee (above). Check the App's **Advanced → Recent Deliveries** on GitHub |
 | Board says it can't reach the API | The API container is down | `docker compose ps`, then `docker compose logs api` |

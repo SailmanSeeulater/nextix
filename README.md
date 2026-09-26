@@ -228,6 +228,45 @@ Limits per run come from `.env`: `AGENT_DEFAULT_TIMEOUT_MIN` (30),
 `AGENT_DEFAULT_MAX_COST_USD` (3), `AGENT_MAX_TURNS` (60), `AGENT_ALLOWED_TOOLS`,
 `AGENT_MEM_LIMIT`, `AGENT_CPUS`.
 
+## Reviewing a run: `.nextix.yml`, tests, screenshots, CI
+
+Each repo can tell nexTix how to build, test, and screenshot it with a `.nextix.yml` in
+its root. The worker reads it from the **default branch** (never from the agent's
+branch, so an agent can't raise its own limits), validates it, and fails the run with
+the reasons if it's broken. Everything is optional:
+
+```yaml
+setup:                       # run before the agent starts (and again if deps changed)
+  - npm ci
+test: npm test               # run after the agent; failures are reported, never blocking
+app:                         # omit for repos without a UI
+  start: npx next dev --port 3000 --hostname 127.0.0.1
+  port: 3000
+  ready_path: /
+  ready_timeout_s: 120
+  screenshots:
+    - path: /
+    - path: /settings
+      viewport: { width: 1280, height: 800 }
+agent:                       # overrides the .env defaults for this repo
+  max_turns: 60
+  timeout_min: 30            # up to 120
+  max_cost_usd: 3.00
+  allowed_tools: [Read, Edit, Write, Bash, Glob, Grep]
+  extra_instructions: |
+    Follow existing code style.
+```
+
+With `app:` set, the sandbox screenshots every route on the default branch before the
+agent starts and again after it finishes, and computes a pixel diff for each. The
+ticket page then has **Diff** (the PR diff from GitHub), **Before / After** (side by
+side, a comparison slider, and the diff image with the share of pixels changed), and
+**Checks** (the test report and the PR's CI check runs, which need the App's
+Checks: Read permission and the Check run / Check suite events). The PR body carries the
+test result and a per-route change table. Test reports and screenshots are stored under
+`ARTIFACT_DIR` and served at `/api/artifacts/<id>`. Contracts and decisions:
+[docs/phase4.md](docs/phase4.md).
+
 ## Developing without compose
 
 Backend (Python 3.12):

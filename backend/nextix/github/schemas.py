@@ -77,6 +77,14 @@ class GhCheckSuiteRef(_Gh):
     head_branch: str | None = None
 
 
+class GhCommitStatus(_Gh):
+    context: str
+    state: str  # pending | success | failure | error
+    target_url: str | None = None
+    description: str | None = None
+    updated_at: datetime | None = None
+
+
 class GhCheckRun(_Gh):
     """A check run, as in check_run webhooks and GET .../commits/{sha}/check-runs."""
 

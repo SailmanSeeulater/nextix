@@ -91,8 +91,8 @@ async def session_factory(database_url: str) -> AsyncIterator[async_sessionmaker
     async with engine.begin() as conn:
         await conn.execute(
             text(
-                "TRUNCATE check_runs, artifacts, run_events, runs, tickets, repos, "
-                "webhook_deliveries CASCADE"
+                "TRUNCATE check_runs, commit_statuses, artifacts, run_events, runs, tickets, "
+                "repos, webhook_deliveries CASCADE"
             )
         )
     yield async_sessionmaker(engine, expire_on_commit=False)
