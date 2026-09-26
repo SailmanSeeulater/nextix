@@ -117,7 +117,22 @@ class GitHubAppAuth:
             return cached.token
         return None
 
-    async def _mint(self, installation_id: int) -> InstallationToken:
+    async def scoped_token(
+        self, installation_id: int, *, repository: str, permissions: dict[str, str]
+    ) -> str:
+        """A fresh, uncached token limited to one repo and the given permissions.
+
+        Used for anything handed outside this process (the agent sandbox gets
+        ``{"contents": "read"}`` for its clone), so it is never shared with the cache.
+        """
+        minted = await self._mint(
+            installation_id, body={"repositories": [repository], "permissions": permissions}
+        )
+        return minted.token
+
+    async def _mint(
+        self, installation_id: int, body: dict[str, object] | None = None
+    ) -> InstallationToken:
         resp = await self._http.post(
             f"{self._api_url}/app/installations/{installation_id}/access_tokens",
             headers={
@@ -125,6 +140,7 @@ class GitHubAppAuth:
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": self._api_version,
             },
+            json=body,
         )
         if resp.status_code in (401, 403, 404):
             raise GitHubAuthError(

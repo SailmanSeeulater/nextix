@@ -10,15 +10,15 @@ import respx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from nextix.api.deps import get_github, get_publisher, get_triager
-from nextix.db.models import Repo, Ticket
+from nextix.api.deps import get_enqueuer, get_github, get_publisher, get_triager
+from nextix.db.models import Repo, Run, Ticket
 from nextix.db.session import get_db
 from nextix.github.client import GitHubClient
 from nextix.main import create_app
 from nextix.tickets.creation import choose_labels
 from nextix.tickets.prompts import TriageResult
 from nextix.tickets.triage import TriageError
-from tests.conftest import FakePublisher
+from tests.conftest import FakeEnqueuer, FakePublisher
 
 AUTH = {"Authorization": "Bearer test-api-token"}
 REPO = "/repos/acme/widgets"
@@ -61,6 +61,7 @@ async def client(
     session_factory: async_sessionmaker[AsyncSession],
     gh: GitHubClient,
     publisher: FakePublisher,
+    enqueuer: FakeEnqueuer,
     triager: FakeTriager,
 ) -> AsyncIterator[httpx.AsyncClient]:
     app = create_app()
@@ -72,6 +73,7 @@ async def client(
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_github] = lambda: gh
     app.dependency_overrides[get_publisher] = lambda: publisher
+    app.dependency_overrides[get_enqueuer] = lambda: enqueuer
     app.dependency_overrides[get_triager] = lambda: triager
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -134,6 +136,7 @@ async def test_actionable_prompt_creates_structured_issue(
     respx_mock: respx.MockRouter,
     triager: FakeTriager,
     publisher: FakePublisher,
+    enqueuer: FakeEnqueuer,
 ) -> None:
     routes = mock_github(respx_mock, labels=["ui", "bug"])
     r = await post(client, labels=["priority"])
@@ -148,14 +151,19 @@ async def test_actionable_prompt_creates_structured_issue(
     assert issue["labels"] == ["nextix", "priority", "ui"]
     created = {json.loads(c.request.content)["name"] for c in routes["create_label"].calls}
     assert created == {"nextix", "priority"}
-    assert not routes["comment"].called
+    # An actionable ticket goes straight to an agent: the only comment is "queued".
+    [comment] = [json.loads(c.request.content)["body"] for c in routes["comment"].calls]
+    assert comment.startswith("🕒 Queued for an agent")
 
     [call] = triager.calls
     assert call["file_paths"] == ["src/settings.tsx"]
     assert call["available_labels"] == ["ui", "bug"]
 
     assert data["needs_input"] is False
-    assert data["ticket"]["column"] == "todo"
+    assert data["ticket"]["column"] == "doing"
+    [run_id] = enqueuer.run_ids
+    run = await session.get(Run, run_id)
+    assert run is not None and (run.status, run.trigger) == ("queued", "initial")
     assert data["ticket"]["created_via"] == "cli"
     assert data["issue_url"] == "https://github.com/acme/widgets/issues/7"
     assert data["board_url"].endswith("/")
@@ -170,10 +178,12 @@ async def test_vague_prompt_lands_in_needs_input_with_question(
     repo: Repo,
     respx_mock: respx.MockRouter,
     triager: FakeTriager,
+    enqueuer: FakeEnqueuer,
 ) -> None:
     triager.result = VAGUE
     routes = mock_github(respx_mock, labels=["nextix"])
     r = await post(client, prompt="make it better")
+    assert enqueuer.run_ids == []  # nothing to do until the question is answered
     assert r.status_code == 201, r.text
     data = r.json()
     assert data["needs_input"] is True

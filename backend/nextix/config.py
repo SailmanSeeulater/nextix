@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     agent_image: str = "nextix-agent:latest"
     agent_default_timeout_min: int = 30
     agent_default_max_cost_usd: float = 3.0
+    agent_max_turns: int = 60
+    agent_allowed_tools: str = "Read,Edit,Write,Bash,Glob,Grep"
+    # Sandboxes join this Docker network so they can reach the API for callbacks.
+    agent_network: str = "nextix_agents"
+    agent_callback_base: str = "http://api:8000"
+    agent_mem_limit: str = "4g"
+    agent_cpus: float = 2.0
+    agent_pids_limit: int = 512
     artifact_dir: Path = Path("/data/artifacts")
 
     # CORS origins for the web app. Comma-separated.

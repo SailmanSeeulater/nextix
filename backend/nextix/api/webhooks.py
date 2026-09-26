@@ -7,12 +7,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nextix.api.deps import get_github, get_publisher
+from nextix.api.deps import get_enqueuer, get_github, get_publisher
 from nextix.config import Settings, get_settings
+from nextix.db.models import Ticket
 from nextix.db.session import get_db
 from nextix.events.stream import EventPublisher, publish_ticket_changes
 from nextix.github.client import GitHubClient
 from nextix.github.webhooks import dispatch, record_delivery, verify_signature
+from nextix.runs.lifecycle import ActiveRunExists, RunEnqueuer, enqueue_run
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +28,7 @@ async def github_webhook(
     gh: Annotated[GitHubClient, Depends(get_github)],
     publisher: Annotated[EventPublisher, Depends(get_publisher)],
     settings: Annotated[Settings, Depends(get_settings)],
+    enqueue: Annotated[RunEnqueuer, Depends(get_enqueuer)],
 ) -> dict[str, Any]:
     body = await request.body()
     if not verify_signature(
@@ -54,4 +57,16 @@ async def github_webhook(
 
     log.info("webhook %s %s.%s: %s", delivery_id, event, action, result.note)
     await publish_ticket_changes(session, publisher, result.changed_tickets)
+    for ticket_id in result.start_runs:
+        ticket = await session.get(Ticket, ticket_id)
+        if ticket is None:
+            continue
+        try:
+            await enqueue_run(
+                session, ticket, trigger="initial", gh=gh, publisher=publisher, enqueue=enqueue
+            )
+        except ActiveRunExists:
+            log.info("ticket %s already has an active run", ticket_id)
+        except Exception:
+            log.exception("could not queue a run for ticket %s", ticket_id)
     return {"status": "ok", "note": result.note, "tickets": len(result.changed_tickets)}

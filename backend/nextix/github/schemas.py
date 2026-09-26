@@ -63,6 +63,7 @@ class GhRef(_Gh):
 class GhPullRequest(_Gh):
     number: int
     state: str  # open | closed
+    html_url: str | None = None
     merged: bool | None = None  # webhook payloads
     merged_at: str | None = None  # REST list responses
     head: GhRef

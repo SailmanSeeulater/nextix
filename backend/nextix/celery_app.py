@@ -13,7 +13,12 @@ configure_logging()
 
 settings = get_settings()
 
-celery_app = Celery("nextix", broker=settings.redis_url, backend=settings.redis_url)
+celery_app = Celery(
+    "nextix",
+    broker=settings.redis_url,
+    backend=settings.redis_url,
+    include=["nextix.runs.tasks"],
+)
 celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
@@ -28,7 +33,12 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     broker_connection_retry_on_startup=True,
-    beat_schedule={},  # reaper is registered here in Phase 3
+    # Agent runs get their own queue, consumed by one worker with concurrency 1 (runs on a
+    # Claude plan share its allowance); everything else uses the default queue.
+    task_routes={"nextix.execute_run": {"queue": "runs"}},
+    beat_schedule={
+        "reap-runs": {"task": "nextix.reap_runs", "schedule": 30.0},
+    },
 )
 
 

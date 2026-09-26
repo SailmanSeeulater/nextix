@@ -13,12 +13,13 @@ import respx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from nextix.api.deps import get_github, get_publisher
-from nextix.db.models import Repo, Ticket, WebhookDelivery
+from nextix.api.deps import get_enqueuer, get_github, get_publisher
+from nextix.config import get_settings
+from nextix.db.models import Repo, Run, Ticket, WebhookDelivery
 from nextix.db.session import get_db
 from nextix.github.client import GitHubClient
 from nextix.main import create_app
-from tests.conftest import FakePublisher, load_fixture
+from tests.conftest import FakeEnqueuer, FakePublisher, load_fixture
 
 SECRET = "test-webhook-secret"
 
@@ -28,6 +29,7 @@ async def client(
     session_factory: async_sessionmaker[AsyncSession],
     gh: GitHubClient,
     publisher: FakePublisher,
+    enqueuer: FakeEnqueuer,
 ) -> AsyncIterator[httpx.AsyncClient]:
     app = create_app()
 
@@ -38,6 +40,7 @@ async def client(
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_github] = lambda: gh
     app.dependency_overrides[get_publisher] = lambda: publisher
+    app.dependency_overrides[get_enqueuer] = lambda: enqueuer
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as c:
@@ -370,3 +373,66 @@ async def test_installation_deleted_retires_all_repos(
     repos = await repos_by_name(session)
     assert set(repos) == {"widgets"}  # gadgets had no tickets
     assert repos["widgets"].enabled is False
+
+
+# ------------------------------------------------------------------ starting runs
+
+
+def labeled_by(login: str, **issue: Any) -> dict[str, Any]:
+    payload = load_fixture("issues_labeled.json")
+    payload["sender"] = {"login": login, "id": 1, "type": "User"}
+    payload["issue"].update(issue)
+    return payload
+
+
+@pytest.fixture
+def comments_42(respx_mock: respx.MockRouter) -> respx.Route:
+    return respx_mock.post("/repos/acme/widgets/issues/42/comments").respond(201, json={})
+
+
+async def test_owner_labeling_nextix_queues_a_run(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+    enqueuer: FakeEnqueuer,
+    comments_42: respx.Route,
+) -> None:
+    r = await deliver(client, "issues", labeled_by("acme"))
+    assert r.status_code == 200, r.text
+    [run_id] = enqueuer.run_ids
+    run = await session.get(Run, run_id)
+    assert run is not None and (run.status, run.branch) == ("queued", "nextix/issue-42")
+    assert comments_42.called
+
+
+async def test_allowed_users_can_start_runs(
+    client: httpx.AsyncClient,
+    enqueuer: FakeEnqueuer,
+    comments_42: respx.Route,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nextix.github.webhooks as webhooks
+
+    allowed = get_settings().model_copy(update={"nextix_allowed_github_users": "Bob, alice"})
+    monkeypatch.setattr(webhooks, "get_settings", lambda: allowed)
+    await deliver(client, "issues", labeled_by("Alice"))
+    assert len(enqueuer.run_ids) == 1
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(lambda: labeled_by("mallory"), id="stranger"),
+        pytest.param(lambda: labeled_by("nextix-perfect[bot]"), id="the app itself"),
+        pytest.param(lambda: labeled_by("acme", state="closed"), id="closed issue"),
+        pytest.param(
+            lambda: labeled_by("acme", labels=[{"name": "nextix"}, {"name": "nextix:needs-input"}]),
+            id="waiting for an answer",
+        ),
+    ],
+)
+async def test_labels_that_do_not_start_runs(
+    client: httpx.AsyncClient, enqueuer: FakeEnqueuer, payload: Any
+) -> None:
+    r = await deliver(client, "issues", payload())
+    assert r.status_code == 200
+    assert enqueuer.run_ids == []

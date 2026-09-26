@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nextix.config import get_settings
 from nextix.db.models import Repo, Ticket, WebhookDelivery
 from nextix.github.client import GitHubClient
 from nextix.github.schemas import (
@@ -55,6 +56,8 @@ async def record_delivery(
 class DispatchResult:
     changed_tickets: set[uuid.UUID] = field(default_factory=set)
     note: str = "ok"
+    # Tickets that should get a run queued once the handler's changes are committed.
+    start_runs: set[uuid.UUID] = field(default_factory=set)
 
 
 Handler = Callable[[dict[str, Any], AsyncSession, GitHubClient], Awaitable[DispatchResult]]
@@ -96,8 +99,36 @@ async def handle_issues(
     if existing is None and service.NEXTIX_LABEL not in issue.label_names:
         return DispatchResult(note="not a nextix issue")
     ticket_id = await service.upsert_ticket_from_issue(session, repo, issue, created_via="github")
-    # Phase 3: newly labeled `nextix` by a trusted actor -> enqueue an initial run.
-    return DispatchResult(changed_tickets={ticket_id})
+    result = DispatchResult(changed_tickets={ticket_id})
+    if _asks_for_an_agent(payload, repo, issue):
+        result.start_runs.add(ticket_id)
+        result.note = "labeled nextix by a trusted user: queueing a run"
+    return result
+
+
+def is_trusted(login: str | None, repo: Repo) -> bool:
+    """The repo's owner, or someone listed in NEXTIX_ALLOWED_GITHUB_USERS."""
+    if not login:
+        return False
+    allowed = {u.lower() for u in get_settings().allowed_github_users}
+    return login.lower() == repo.owner.lower() or login.lower() in allowed
+
+
+def _asks_for_an_agent(payload: dict[str, Any], repo: Repo, issue: GhIssue) -> bool:
+    """`issues.labeled` with `nextix`, by a trusted person, on an open, answerable issue.
+
+    Issues the app itself labels (tickets created from the CLI or web) are queued by the API
+    directly; their webhooks come from the bot, which is not trusted here.
+    """
+    label = (payload.get("label") or {}).get("name")
+    sender = (payload.get("sender") or {}).get("login")
+    return (
+        payload.get("action") == "labeled"
+        and label == service.NEXTIX_LABEL
+        and issue.state == "open"
+        and service.NEEDS_INPUT_LABEL not in issue.label_names
+        and is_trusted(sender, repo)
+    )
 
 
 async def handle_pull_request(

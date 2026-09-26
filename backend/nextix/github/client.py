@@ -7,6 +7,7 @@ which uses the app JWT to discover which installation covers a repo.
 import re
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -50,6 +51,20 @@ class GitHubClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+    async def _patch(self, installation_id: int, path: str, body: dict[str, Any]) -> Any:
+        resp = await self._http.patch(
+            f"{self._api_url}{path}", headers=await self._headers(installation_id), json=body
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _delete(self, installation_id: int, path: str) -> None:
+        resp = await self._http.delete(
+            f"{self._api_url}{path}", headers=await self._headers(installation_id)
+        )
+        if resp.status_code not in (200, 204, 404):
+            resp.raise_for_status()
 
     async def _paginate(
         self,
@@ -201,3 +216,59 @@ class GitHubClient:
                 return []
             raise
         return sorted(e["path"] for e in data.get("tree", []) if e.get("type") == "blob")
+
+    # ------------------------------------------------------------------ runs
+
+    async def find_open_pull(
+        self, installation_id: int, owner: str, name: str, *, branch: str
+    ) -> GhPullRequest | None:
+        """The open PR whose head is ``owner:branch`` in this repo, if any."""
+        data = await self._get(
+            installation_id,
+            f"/repos/{owner}/{name}/pulls",
+            params={"head": f"{owner}:{branch}", "state": "open", "per_page": 10},
+        )
+        return GhPullRequest.model_validate(data[0]) if data else None
+
+    async def create_pull(
+        self,
+        installation_id: int,
+        owner: str,
+        name: str,
+        *,
+        title: str,
+        body: str,
+        head: str,
+        base: str,
+    ) -> GhPullRequest:
+        data = await self._post(
+            installation_id,
+            f"/repos/{owner}/{name}/pulls",
+            {"title": title, "body": body, "head": head, "base": base},
+        )
+        return GhPullRequest.model_validate(data)
+
+    async def update_pull(
+        self, installation_id: int, owner: str, name: str, number: int, *, title: str, body: str
+    ) -> GhPullRequest:
+        data = await self._patch(
+            installation_id,
+            f"/repos/{owner}/{name}/pulls/{number}",
+            {"title": title, "body": body},
+        )
+        return GhPullRequest.model_validate(data)
+
+    async def add_labels(
+        self, installation_id: int, owner: str, name: str, number: int, labels: list[str]
+    ) -> None:
+        await self._post(
+            installation_id, f"/repos/{owner}/{name}/issues/{number}/labels", {"labels": labels}
+        )
+
+    async def remove_label(
+        self, installation_id: int, owner: str, name: str, number: int, label: str
+    ) -> None:
+        await self._delete(
+            installation_id,
+            f"/repos/{owner}/{name}/issues/{number}/labels/{quote(label, safe='')}",
+        )

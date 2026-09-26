@@ -8,11 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nextix.api.auth import require_user
-from nextix.api.deps import get_github, get_publisher, get_triager
+from nextix.api.deps import get_enqueuer, get_github, get_publisher, get_triager
 from nextix.config import Settings, get_settings
+from nextix.db.models import Ticket
 from nextix.db.session import get_db
 from nextix.events.stream import EventPublisher, publish_ticket_changes
 from nextix.github.client import GitHubClient
+from nextix.runs.lifecycle import ActiveRunExists, RunEnqueuer, enqueue_run
 from nextix.tickets.creation import TicketCreationError, create_ticket
 from nextix.tickets.schemas import (
     Column,
@@ -45,6 +47,7 @@ async def post_ticket(
     triager: Annotated[Triager | None, Depends(get_triager)],
     publisher: Annotated[EventPublisher, Depends(get_publisher)],
     settings: Annotated[Settings, Depends(get_settings)],
+    enqueue: Annotated[RunEnqueuer, Depends(get_enqueuer)],
 ) -> CreateTicketResponse:
     try:
         created = await create_ticket(
@@ -73,8 +76,19 @@ async def post_ticket(
         ) from exc
     await session.commit()
 
-    # Phase 3: enqueue an initial run here when the ticket is actionable.
     await publish_ticket_changes(session, publisher, {created.ticket_id})
+    if not created.needs_input:
+        ticket = await session.get(Ticket, created.ticket_id)
+        if ticket is not None:
+            try:
+                await enqueue_run(
+                    session, ticket, trigger="initial", gh=gh, publisher=publisher, enqueue=enqueue
+                )
+            except ActiveRunExists:
+                pass  # the issues.labeled webhook got there first
+            except Exception:
+                # The ticket exists on GitHub either way; the owner can start it from the board.
+                log.exception("could not queue the first run for ticket %s", created.ticket_id)
     found = await get_card(session, created.ticket_id)
     assert found is not None
     card, _ = found

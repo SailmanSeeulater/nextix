@@ -25,6 +25,8 @@ dependencies = [
   # Runs Claude Code for subscription-billed triage and agent runs; its Linux wheel
   # bundles the Claude Code binary, so the image needs no separate install.
   "claude-agent-sdk>=0.2.160,<0.3",
+  # The runs worker starts agent sandboxes through the host's Docker socket.
+  "docker>=7.1,<8",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +38,7 @@ dev = [
   "ruff>=0.5",
   "mypy>=1.10",
   "types-PyYAML",
+  "types-docker",
   "celery-types",
 ]
 

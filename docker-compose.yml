@@ -14,7 +14,7 @@ services:
       POSTGRES_PASSWORD: nextix
       POSTGRES_DB: nextix
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +26,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -41,6 +41,9 @@ services:
              uvicorn nextix.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "${API_PORT:-8000}:8000"
+    # `agents` is the sandboxes' network: they can reach the API (for callbacks) and the
+    # internet, but not Postgres or Redis, which are only on `default`.
+    networks: [default, agents]
     volumes:
       - ./backend:/app
       - artifacts:/data/artifacts
@@ -56,10 +59,11 @@ services:
       timeout: 5s
       retries: 6
 
+  # Everything except agent runs: triage, the reaper, and other housekeeping.
   worker:
     build: ./backend
     <<: *backend-env
-    command: celery -A nextix.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A nextix.celery_app worker --loglevel=info --queues=celery --concurrency=2
     volumes:
       - ./backend:/app
       - artifacts:/data/artifacts
@@ -67,6 +71,29 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Agent runs, one at a time. This is the only service with the Docker socket: it starts
+  # and stops the sandboxes. The socket is root-owned, so this worker runs as root; the
+  # sandboxes it starts run as uid 1000 with no capabilities and no socket.
+  runner:
+    build: ./backend
+    <<: *backend-env
+    command: celery -A nextix.celery_app worker --loglevel=info --queues=runs --concurrency=1 --hostname=runner@%h
+    user: root
+    volumes:
+      - ./backend:/app
+      - ./secrets:/run/secrets:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # The agent sandbox image. Not a long-running service: build it with
+  #   docker compose build agent
+  agent:
+    build: ./agent-image
+    image: nextix-agent:latest
+    profiles: [agent]
 
   beat:
     build: ./backend
@@ -97,6 +124,10 @@ services:
       - web_next:/app/.next
     depends_on:
       - api
+
+networks:
+  agents:
+    name: nextix_agents
 
 volumes:
   pgdata:

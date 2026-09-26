@@ -1,0 +1,152 @@
+"""The agent sandbox: one locked-down Docker container per run.
+
+`Sandbox` is the interface the worker uses; `DockerSandbox` implements it with the Docker
+SDK (the worker has the host's Docker socket; sandboxes never do). Tests use a fake.
+"""
+
+import contextlib
+import io
+import logging
+import tarfile
+import uuid
+from dataclasses import dataclass, field
+from typing import Protocol
+
+log = logging.getLogger(__name__)
+
+RUN_LABEL = "nextix.run_id"
+OUT_DIR = "/work/.nextix-out"
+RESULT_PATH = f"{OUT_DIR}/result.json"
+BUNDLE_PATH = f"{OUT_DIR}/branch.bundle"
+
+
+@dataclass(frozen=True)
+class SandboxSpec:
+    run_id: uuid.UUID
+    image: str
+    env: dict[str, str] = field(repr=False)  # holds credentials: never printed
+    network: str | None = None
+    mem_limit: str = "4g"
+    nano_cpus: int = 2_000_000_000
+    pids_limit: int = 512
+
+
+class Sandbox(Protocol):
+    def start(self, spec: SandboxSpec) -> str:
+        """Create and start the container; return its id."""
+        ...
+
+    def is_running(self, container_id: str) -> bool: ...
+
+    def read_file(self, container_id: str, path: str) -> bytes | None:
+        """A file from the (possibly stopped) container, or None if it isn't there."""
+        ...
+
+    def kill(self, container_id: str) -> None: ...
+
+    def remove(self, container_id: str) -> None: ...
+
+    def kill_run(self, run_id: uuid.UUID) -> bool:
+        """Kill and remove any container labelled with this run; True if one existed."""
+        ...
+
+    def labelled_runs(self) -> set[uuid.UUID]:
+        """Run ids of every sandbox container that still exists, running or not."""
+        ...
+
+
+class DockerSandbox:
+    def __init__(self) -> None:
+        import docker
+
+        self._docker = docker.from_env()
+
+    def start(self, spec: SandboxSpec) -> str:
+        container = self._docker.containers.run(
+            spec.image,
+            detach=True,
+            environment=spec.env,
+            labels={RUN_LABEL: str(spec.run_id)},
+            network=spec.network,
+            user="1000:1000",
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges:true"],
+            mem_limit=spec.mem_limit,
+            memswap_limit=spec.mem_limit,
+            nano_cpus=spec.nano_cpus,
+            pids_limit=spec.pids_limit,
+            # Docker Desktop's names for the host machine lead to ports published there
+            # (Postgres, Redis); point them nowhere. The API is reached as `api`.
+            extra_hosts={
+                "host.docker.internal": "127.0.0.1",
+                "gateway.docker.internal": "127.0.0.1",
+            },
+            # No volumes, no binds, no Docker socket, no privileged mode.
+        )
+        return str(container.id)
+
+    def _get(self, container_id: str):  # type: ignore[no-untyped-def]
+        import docker.errors
+
+        try:
+            return self._docker.containers.get(container_id)
+        except docker.errors.NotFound:
+            return None
+
+    def is_running(self, container_id: str) -> bool:
+        container = self._get(container_id)
+        if container is None:
+            return False
+        container.reload()
+        return bool(container.status in ("created", "running", "restarting"))
+
+    def read_file(self, container_id: str, path: str) -> bytes | None:
+        import docker.errors
+
+        container = self._get(container_id)
+        if container is None:
+            return None
+        try:
+            stream, _ = container.get_archive(path)
+        except docker.errors.NotFound:
+            return None
+        archive = io.BytesIO(b"".join(stream))
+        with tarfile.open(fileobj=archive) as tar:
+            for member in tar.getmembers():
+                if member.isfile():
+                    extracted = tar.extractfile(member)
+                    return extracted.read() if extracted else None
+        return None
+
+    def kill(self, container_id: str) -> None:
+        import docker.errors
+
+        container = self._get(container_id)
+        if container is None:
+            return
+        with contextlib.suppress(docker.errors.APIError):  # already stopped
+            container.kill()
+
+    def remove(self, container_id: str) -> None:
+        import docker.errors
+
+        container = self._get(container_id)
+        if container is None:
+            return
+        try:
+            container.remove(force=True)
+        except docker.errors.APIError:
+            log.warning("could not remove container %s", container_id[:12])
+
+    def kill_run(self, run_id: uuid.UUID) -> bool:
+        found = self._docker.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"})
+        for container in found:
+            self.remove(str(container.id))
+        return bool(found)
+
+    def labelled_runs(self) -> set[uuid.UUID]:
+        found: set[uuid.UUID] = set()
+        for container in self._docker.containers.list(all=True, filters={"label": RUN_LABEL}):
+            with contextlib.suppress(ValueError, TypeError):
+                found.add(uuid.UUID(container.labels.get(RUN_LABEL)))
+        return found
