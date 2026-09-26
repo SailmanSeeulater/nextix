@@ -417,7 +417,10 @@ def test_tool_results_inside_user_messages_map_to_tool_result() -> None:
 
 def test_result_message_maps_to_usage() -> None:
     assert events_for_message(result_message()) == [
-        {"kind": "usage", "payload": {"input_tokens": 1200, "output_tokens": 340, "cost_usd": 0.42}}
+        {
+            "kind": "usage",
+            "payload": {"input_tokens": 10200, "output_tokens": 340, "cost_usd": 0.42},
+        }
     ]
 
 
@@ -582,7 +585,7 @@ async def test_success_result_is_the_summary() -> None:
     outcome, emitted = await run_drive(ScriptedQuery(result_message()))
     assert outcome.status == "succeeded"
     assert outcome.summary == "Added hello.txt with a greeting."
-    assert outcome.usage == runner.Usage(1200, 340, 0.42, 4)
+    assert outcome.usage == runner.Usage(10200, 340, 0.42, 4)  # cache reads count as input
     assert [e["kind"] for e in emitted] == ["usage"]
 
 
@@ -760,7 +763,7 @@ async def test_changes_are_committed_and_bundled(tmp_path: Path, origin: Path) -
         "question": None,
         "commits": 1,
         "exit_reason": None,
-        "input_tokens": 1200,
+        "input_tokens": 10200,  # 1200 fresh + 9000 read from the prompt cache
         "output_tokens": 340,
         "cost_usd": 0.42,
         "num_turns": 4,
