@@ -160,8 +160,12 @@ async def create_ticket(
         session, repo, issue, created_via=created_via
     )
     # The issues.opened webhook can land first and record created_via="github".
+    # Triage's question is kept so the first run can be given the owner's reply.
+    question = result.clarifying_question if needs_input else None
     await session.execute(
-        update(Ticket).where(Ticket.id == ticket_id).values(created_via=created_via)
+        update(Ticket)
+        .where(Ticket.id == ticket_id)
+        .values(created_via=created_via, triage_question=question)
     )
     return CreatedTicket(
         ticket_id=ticket_id,

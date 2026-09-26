@@ -21,11 +21,15 @@ def redact(text: str) -> str:
 
 
 def redact_obj(value: Any) -> Any:
-    """Redact every string inside a JSON-like structure."""
+    """Redact every string inside a JSON-like structure, and drop NUL characters, which
+    Postgres can't store in JSONB (one would make the whole batch fail)."""
     if isinstance(value, str):
-        return redact(value)
+        return redact(value.replace("\x00", ""))
     if isinstance(value, list):
         return [redact_obj(v) for v in value]
     if isinstance(value, dict):
-        return {k: redact_obj(v) for k, v in value.items()}
+        return {
+            (k.replace("\x00", "") if isinstance(k, str) else k): redact_obj(v)
+            for k, v in value.items()
+        }
     return value

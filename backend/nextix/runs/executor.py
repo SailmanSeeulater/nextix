@@ -19,7 +19,7 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nextix.claude_auth import ClaudeAuth, resolve
@@ -31,7 +31,7 @@ from nextix.redact import redact
 from nextix.runs.lifecycle import record_transition
 from nextix.runs.push import BranchPusher, PushError
 from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, Sandbox, SandboxSpec
-from nextix.runs.state import TERMINAL_STATUSES, RunStatus
+from nextix.runs.state import ACTIVE_STATUSES, TERMINAL_STATUSES, RunStatus
 from nextix.tickets.service import NEEDS_INPUT_LABEL, is_trusted
 
 log = logging.getLogger(__name__)
@@ -89,15 +89,19 @@ def sandbox_env(
     clone_token: str,
     clarification: str = "",
 ) -> dict[str, str]:
-    """The complete environment contract from docs/phase3.md. Nothing else is passed."""
-    body = ticket.body or ""
+    """The complete environment contract from docs/phase3.md. Nothing else is passed.
+
+    The task is the run's snapshot (what the trusted person approved), not the live issue.
+    """
+    title = run.task_title if run.task_title is not None else ticket.title
+    body = run.task_body if run.task_body is not None else (ticket.body or "")
     if len(body) > MAX_ISSUE_BODY_CHARS:
         body = body[:MAX_ISSUE_BODY_CHARS] + "\n\n… [the rest of the issue was cut: too long]"
     if clarification:
         clarification = clarification[:MAX_CLARIFICATION_CHARS]
         body = f"{body}\n\n{clarification}" if body else clarification
     task = {
-        "title": ticket.title,
+        "title": title,
         "body": body,
         "extra_instructions": "",  # from .nextix.yml in Phase 4
         "review_comments": [],  # from PR reviews in Phase 5
@@ -145,18 +149,23 @@ def pr_body(*, settings: Settings, run: Run, ticket: Ticket, result: RunResult) 
 async def clarification_for(
     session: AsyncSession, run: Run, ticket: Ticket, repo: Repo, ctx: WorkerContext
 ) -> str:
-    """If an earlier run asked a question, the question and the trusted people's replies.
+    """The last open question on this ticket and the trusted people's replies to it.
 
-    Replies are issue comments from the repo owner or NEXTIX_ALLOWED_GITHUB_USERS posted
-    after that run finished; anyone else's comments are left out.
+    The question is the one an earlier run asked, or, before any run asked one, the one
+    triage asked when the ticket was filed. Replies are issue comments from the repo owner
+    or NEXTIX_ALLOWED_GITHUB_USERS posted after it; anyone else's comments are left out.
     """
-    asked = await session.scalar(
+    asked_run = await session.scalar(
         select(Run)
         .where(Run.ticket_id == ticket.id, Run.id != run.id, Run.question.is_not(None))
         .order_by(Run.attempt.desc())
         .limit(1)
     )
-    if asked is None or not asked.question:
+    if asked_run is not None and asked_run.question:
+        question, asked_at, who = asked_run.question, asked_run.finished_at, "A previous attempt"
+    elif ticket.triage_question:
+        question, asked_at, who = ticket.triage_question, ticket.created_at, "Triage"
+    else:
         return ""
     try:
         comments = await ctx.gh.list_issue_comments(
@@ -164,7 +173,7 @@ async def clarification_for(
             repo.owner,
             repo.name,
             ticket.issue_number,
-            since=asked.finished_at,
+            since=asked_at,
         )
     except Exception:
         log.exception("could not read the answers on %s#%s", repo.full_name, ticket.issue_number)
@@ -177,7 +186,7 @@ async def clarification_for(
         and c.body
         and c.body.strip()
         and is_trusted(c.user.login, repo, allowed)
-        and (asked.finished_at is None or c.created_at >= asked.finished_at)
+        and (asked_at is None or c.created_at >= asked_at)
     ]
     reply = (
         "\n\n".join(answers)
@@ -186,7 +195,7 @@ async def clarification_for(
     )
     return (
         "## Earlier question and answer\n\n"
-        f"A previous attempt stopped to ask:\n\n{asked.question}\n\n"
+        f"{who} stopped to ask:\n\n{question}\n\n"
         f"The answer:\n\n{reply}"
     )
 
@@ -267,6 +276,33 @@ async def _wait(session: AsyncSession, run: Run, container_id: str, ctx: WorkerC
         await asyncio.sleep(ctx.poll_interval_s)
 
 
+KEEP_ALIVE_INTERVAL_S = 20.0
+
+
+async def _keep_alive(ctx: WorkerContext, run_id: uuid.UUID) -> None:
+    """Heartbeat on the sandbox's behalf while the worker publishes its work."""
+    while True:
+        try:
+            async with ctx.sessions() as session:
+                await session.execute(
+                    update(Run)
+                    .where(Run.id == run_id, Run.status.in_(ACTIVE_STATUSES))
+                    .values(last_heartbeat=datetime.now(UTC))
+                )
+                await session.commit()
+        except Exception:
+            log.exception("could not refresh the heartbeat of run %s", run_id)
+        await asyncio.sleep(KEEP_ALIVE_INTERVAL_S)
+
+
+async def _still_active(session: AsyncSession, run: Run) -> bool:
+    """Re-read the run under a row lock; False once it was cancelled or reaped."""
+    await session.refresh(run, with_for_update=True)
+    active = run.status not in TERMINAL_STATUSES
+    await session.commit()
+    return active
+
+
 def _parse_result(raw: bytes | None) -> RunResult | None:
     if raw is None:
         return None
@@ -277,22 +313,41 @@ def _parse_result(raw: bytes | None) -> RunResult | None:
         return None
 
 
-async def sweep_orphans(session: AsyncSession, sandbox: Sandbox) -> set[uuid.UUID]:
-    """Remove sandboxes whose run is over, e.g. left behind when a worker died mid-run."""
-    labelled = await asyncio.to_thread(sandbox.labelled_runs)
-    if not labelled:
-        return set()
-    live = set(
-        await session.scalars(
-            select(Run.id).where(Run.id.in_(labelled), Run.status.not_in(TERMINAL_STATUSES))
+async def sweep_orphans(session: AsyncSession, ctx: WorkerContext) -> set[uuid.UUID]:
+    """Remove every sandbox left from before this run, e.g. after the runner restarted.
+
+    There is one runner and it runs one agent at a time, so a sandbox that exists when a
+    run starts has nobody watching it: its result would never be collected. It is removed,
+    and its run, if still active, fails with `worker_restarted` so it can be retried.
+    (With several runners this would need per-worker ownership; that's Phase 6.)
+    """
+    labelled = await asyncio.to_thread(ctx.sandbox.labelled_runs)
+    for run_id in labelled:
+        log.warning("removing the unsupervised sandbox of run %s", run_id)
+        await asyncio.to_thread(ctx.sandbox.kill_run, run_id)
+        run = await session.scalar(
+            select(Run)
+            .where(Run.id == run_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-    )
-    await session.commit()
-    orphans = labelled - live
-    for run_id in orphans:
-        log.warning("removing the leftover sandbox of finished run %s", run_id)
-        await asyncio.to_thread(sandbox.kill_run, run_id)
-    return orphans
+        # Nothing to change: commit (not roll back) to release the lock, so objects the
+        # caller holds in this session aren't expired.
+        if run is None or run.status in TERMINAL_STATUSES:
+            await session.commit()
+            continue
+        if run.status == RunStatus.QUEUED:
+            await session.commit()  # never started, so it isn't this sandbox's run
+            continue
+        await record_transition(
+            session,
+            run,
+            RunStatus.FAILED,
+            gh=ctx.gh,
+            publisher=ctx.publisher,
+            exit_reason="worker_restarted",
+        )
+    return labelled
 
 
 async def _has_base_branch(repo: Repo, ctx: WorkerContext) -> bool:
@@ -308,7 +363,7 @@ async def _has_base_branch(repo: Repo, ctx: WorkerContext) -> bool:
 async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
     async with ctx.sessions() as session:
         try:
-            await sweep_orphans(session, ctx.sandbox)
+            await sweep_orphans(session, ctx)
         except Exception:
             log.exception("could not sweep leftover sandboxes")
         run = await _claim(session, run_id, ctx)
@@ -346,6 +401,7 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
             return
 
         container_id: str | None = None
+        keep_alive: asyncio.Task[None] | None = None
         outcome = "exited"
         result: RunResult | None = None
         bundle: bytes | None = None
@@ -374,6 +430,7 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
             run.container_id = container_id
             await session.commit()
             outcome = await _wait(session, run, container_id, ctx)
+            keep_alive = asyncio.create_task(_keep_alive(ctx, run.id))
             result = _parse_result(
                 await asyncio.to_thread(ctx.sandbox.read_file, container_id, RESULT_PATH)
             )
@@ -389,15 +446,21 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                 exit_reason="sandbox_error",
                 comment=f"❌ Failed: the sandbox could not run ({redact(str(exc))[:200]}).",
             )
+            if keep_alive:
+                keep_alive.cancel()
             return
         finally:
             if container_id:
                 await asyncio.to_thread(ctx.sandbox.remove, container_id)
 
-        await _record_usage(session, run, result)
-        await _conclude(
-            session, run, ticket, repo, ctx, outcome=outcome, result=result, bundle=bundle
-        )
+        try:
+            await _record_usage(session, run, result)
+            await _conclude(
+                session, run, ticket, repo, ctx, outcome=outcome, result=result, bundle=bundle
+            )
+        finally:
+            if keep_alive:
+                keep_alive.cancel()
 
 
 async def _record_usage(session: AsyncSession, run: Run, result: RunResult | None) -> None:
@@ -456,6 +519,9 @@ async def _conclude(
         return
 
     try:
+        if not await _still_active(session, run):
+            log.info("run %s ended before publishing; nothing pushed", run.id)
+            return
         write_token = await ctx.gh.auth.scoped_token(
             repo.installation_id, repository=repo.name, permissions={"contents": "write"}
         )
@@ -467,6 +533,9 @@ async def _conclude(
             default_branch=repo.default_branch,
             bundle=bundle,
         )
+        if not await _still_active(session, run):
+            log.info("run %s ended after its push; no pull request opened", run.id)
+            return
         pr, created = await _open_or_update_pr(run, ticket, repo, ctx, result)
     except (PushError, Exception) as exc:
         log.exception("publishing run %s failed", run.id)
@@ -526,14 +595,19 @@ async def _open_or_update_pr(
 async def _needs_input(
     session: AsyncSession, run: Run, ticket: Ticket, repo: Repo, ctx: WorkerContext, question: str
 ) -> None:
+    ticket_id = ticket.id
     question = redact(question.strip())[:4000]
+    await session.refresh(run, with_for_update=True)
+    if run.status in TERMINAL_STATUSES:
+        await session.rollback()
+        return  # cancelled or reaped meanwhile: don't ask on its behalf
     run.question = question
     await session.commit()
     try:
         await ctx.gh.add_labels(
             repo.installation_id, repo.owner, repo.name, ticket.issue_number, [NEEDS_INPUT_LABEL]
         )
-        ticket = await session.get(Ticket, ticket.id, populate_existing=True) or ticket
+        ticket = await session.get(Ticket, ticket_id, populate_existing=True) or ticket
         if NEEDS_INPUT_LABEL not in ticket.labels:
             ticket.labels = [*ticket.labels, NEEDS_INPUT_LABEL]
             await session.commit()
@@ -549,4 +623,4 @@ async def _needs_input(
             f"{question}\n\nReply to this issue with the answer."
         ),
     )
-    await publish_ticket_changes(session, ctx.publisher, {ticket.id})
+    await publish_ticket_changes(session, ctx.publisher, {ticket_id})

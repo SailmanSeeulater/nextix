@@ -56,8 +56,9 @@ async def record_delivery(
 class DispatchResult:
     changed_tickets: set[uuid.UUID] = field(default_factory=set)
     note: str = "ok"
-    # Tickets that should get a run queued once the handler's changes are committed.
-    start_runs: set[uuid.UUID] = field(default_factory=set)
+    # Tickets that should get a run queued once the handler's changes are committed, with
+    # the task (title, body) exactly as the trusted person saw it when they asked.
+    start_runs: dict[uuid.UUID, tuple[str, str]] = field(default_factory=dict)
 
 
 Handler = Callable[[dict[str, Any], AsyncSession, GitHubClient], Awaitable[DispatchResult]]
@@ -101,7 +102,7 @@ async def handle_issues(
     ticket_id = await service.upsert_ticket_from_issue(session, repo, issue, created_via="github")
     result = DispatchResult(changed_tickets={ticket_id})
     if _asks_for_an_agent(payload, repo, issue):
-        result.start_runs.add(ticket_id)
+        result.start_runs[ticket_id] = (issue.title, issue.body or "")
         result.note = "a trusted user asked for an agent: queueing a run"
     return result
 

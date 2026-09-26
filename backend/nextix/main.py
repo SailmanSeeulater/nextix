@@ -37,6 +37,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         removed = scrub_competing_credentials()
         if removed:
             log.info("subscription mode: removed %s from the environment", ", ".join(removed))
+    if settings.nextix_api_token.strip() in ("", "change-me"):
+        log.warning(
+            "NEXTIX_API_TOKEN is unset or the example value: anyone who can reach the API, "
+            "including agent sandboxes, can use it. Set a long random token in .env."
+        )
     app.state.triager = build_triager(settings)
     if app.state.claude_auth is ClaudeAuth.NONE:
         log.warning("Claude triage is off: %s", describe_missing(settings))

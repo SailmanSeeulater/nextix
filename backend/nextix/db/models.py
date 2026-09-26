@@ -69,6 +69,7 @@ class Ticket(Base):
     pr_number: Mapped[int | None] = mapped_column(Integer)
     pr_state: Mapped[str | None] = mapped_column(Text)  # open | closed | merged
     created_via: Mapped[str | None] = mapped_column(Text)  # cli | web | mcp | github
+    triage_question: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -117,6 +118,9 @@ class Run(Base):
     callback_secret: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
     question: Mapped[str | None] = mapped_column(Text)
+    task_title: Mapped[str | None] = mapped_column(Text)
+    task_body: Mapped[str | None] = mapped_column(Text)
+    last_batch: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     ticket: Mapped[Ticket] = relationship(back_populates="runs")
     events: Mapped[list["RunEvent"]] = relationship(back_populates="run", order_by="RunEvent.id")

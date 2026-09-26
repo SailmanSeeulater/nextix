@@ -326,3 +326,134 @@ async def test_queueing_a_run_takes_the_ticket_out_of_needs_input(
     assert removed.called
     await session.refresh(ticket)
     assert ticket.labels == ["nextix"]
+
+
+# ------------------------------------------------------------------ review fixes
+
+
+async def test_a_resent_batch_is_stored_once(
+    client: httpx.AsyncClient, session: AsyncSession
+) -> None:
+    run = await make_run(session, await make_ticket(session), status="running")
+
+    async def send(batch: int) -> httpx.Response:
+        body = json.dumps(
+            {"batch": batch, "events": [{"kind": "log", "payload": {"text": f"b{batch}"}}]}
+        ).encode()
+        return await client.post(
+            f"/api/internal/runs/{run.id}/events",
+            content=body,
+            headers={"X-Nextix-Signature": sign(SECRET, body)},
+        )
+
+    assert (await send(1)).json() == {"stored": 1}
+    assert (await send(1)).json() == {"stored": 0, "duplicate": True}  # the runner retried
+    assert (await send(2)).json() == {"stored": 1}
+    texts = [e.payload["text"] for e in (await session.scalars(select(RunEvent))).all()]
+    assert texts == ["b1", "b2"]
+
+
+async def test_nul_characters_do_not_sink_a_batch(
+    client: httpx.AsyncClient, session: AsyncSession
+) -> None:
+    run = await make_run(session, await make_ticket(session), status="running")
+    r = await callback(client, run.id, [{"kind": "message", "payload": {"text": "a\u0000b"}}])
+    assert r.status_code == 202
+    [row] = (await session.scalars(select(RunEvent))).all()
+    assert row.payload["text"] == "ab"
+
+
+async def test_an_oversized_body_is_refused_before_it_is_read(
+    client: httpx.AsyncClient, session: AsyncSession
+) -> None:
+    run = await make_run(session, await make_ticket(session), status="running")
+    r = await client.post(
+        f"/api/internal/runs/{run.id}/events",
+        content=b"x" * (5 * 1024 * 1024 + 1),
+        headers={"X-Nextix-Signature": "sha256=0"},
+    )
+    assert r.status_code == 413
+
+
+async def test_a_cancel_that_lands_mid_callback_is_not_undone(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    comments: respx.Route,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nextix.api.internal as internal
+
+    run = await make_run(session, await make_ticket(session))  # claimed
+    original = internal.store_events
+
+    async def cancel_right_after_storing(*args: Any, **kwargs: Any) -> Any:
+        stored = await original(*args, **kwargs)
+        async with session_factory() as other:
+            row = await other.get(Run, run.id)
+            assert row is not None
+            row.status, row.finished_at = "cancelled", datetime.now(UTC)
+            await other.commit()
+        return stored
+
+    monkeypatch.setattr(internal, "store_events", cancel_right_after_storing)
+    r = await callback(client, run.id, [{"kind": "state", "payload": {"status": "running"}}])
+    assert r.status_code == 202
+    await session.refresh(run)
+    assert run.status == "cancelled"
+
+
+async def test_losing_the_enqueue_race_raises_active_run_exists(
+    session: AsyncSession,
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    enqueuer: FakeEnqueuer,
+    comments: respx.Route,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import nextix.runs.lifecycle as lifecycle
+
+    ticket = await make_ticket(session)
+    await make_run(session, ticket, status="running")
+    real = lifecycle.active_run
+    calls = 0
+
+    async def misses_it_once(s: AsyncSession, ticket_id: uuid.UUID) -> Run | None:
+        nonlocal calls
+        calls += 1
+        return None if calls == 1 else await real(s, ticket_id)  # the other request won
+
+    monkeypatch.setattr(lifecycle, "active_run", misses_it_once)
+    with pytest.raises(ActiveRunExists):
+        await enqueue_run(
+            session, ticket, trigger="retry", gh=gh, publisher=publisher, enqueue=enqueuer
+        )
+    assert enqueuer.run_ids == []
+
+
+def test_run_time_limits_leave_room_for_the_agent_and_the_push() -> None:
+    from nextix.api.deps import run_time_limits
+
+    soft, hard = run_time_limits(90)
+    assert soft > 90 * 60 + 120 and hard > soft
+
+
+async def test_webhook_runs_use_the_issue_as_the_labeler_saw_it(
+    session: AsyncSession,
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    enqueuer: FakeEnqueuer,
+    comments: respx.Route,
+) -> None:
+    ticket = await make_ticket(session)
+    run = await enqueue_run(
+        session,
+        ticket,
+        trigger="initial",
+        gh=gh,
+        publisher=publisher,
+        enqueue=enqueuer,
+        task_title="Approved title",
+        task_body="Approved body",
+    )
+    assert (run.task_title, run.task_body) == ("Approved title", "Approved body")

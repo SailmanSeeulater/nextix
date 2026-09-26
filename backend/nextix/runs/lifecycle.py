@@ -90,6 +90,7 @@ def _comment_for(run: Run, status: str, exit_reason: str | None) -> str | None:
         "no_claude_credentials": "no Claude credentials are configured on the server",
         "enqueue_failed": "the run could not be handed to a worker",
         "empty_repo": "the repository has no commits to branch from",
+        "worker_restarted": "the runner restarted mid-run, so nobody was watching this run",
         "secret_in_changes": (
             "the agent's changes contained one of the run's credentials, so nothing was pushed"
         ),
@@ -182,13 +183,20 @@ async def enqueue_run(
     gh: GitHubClient,
     publisher: EventPublisher,
     enqueue: RunEnqueuer,
+    task_title: str | None = None,
+    task_body: str | None = None,
 ) -> Run:
     """Create a queued run for `ticket` and hand it to the worker.
+
+    The run keeps a snapshot of the task (`task_title`/`task_body`, default: the ticket as
+    it is now): the agent works from what the trusted person approved, not from whatever
+    the issue says by the time the run starts.
 
     Raises ActiveRunExists if the ticket already has a queued/claimed/running run (the
     database's partial unique index backs this up against races).
     """
-    existing = await active_run(session, ticket.id)
+    ticket_id = ticket.id
+    existing = await active_run(session, ticket_id)
     if existing:
         raise ActiveRunExists(existing)
     attempt = (
@@ -204,13 +212,16 @@ async def enqueue_run(
         status=RunStatus.QUEUED,
         branch=f"{BRANCH_PREFIX}{ticket.issue_number}",
         queued_at=datetime.now(UTC),
+        task_title=ticket.title if task_title is None else task_title,
+        task_body=(ticket.body or "") if task_body is None else task_body,
     )
-    session.add(run)
     try:
-        await session.flush()
+        # A savepoint, so losing a race rolls back only this insert and nothing else in
+        # the session is expired.
+        async with session.begin_nested():
+            session.add(run)
     except IntegrityError as exc:
-        await session.rollback()
-        existing = await active_run(session, ticket.id)
+        existing = await active_run(session, ticket_id)
         if existing:
             raise ActiveRunExists(existing) from exc
         raise

@@ -401,6 +401,8 @@ async def test_owner_labeling_nextix_queues_a_run(
     [run_id] = enqueuer.run_ids
     run = await session.get(Run, run_id)
     assert run is not None and (run.status, run.branch) == ("queued", "nextix/issue-42")
+    # The task is frozen as the owner saw it in this event, not re-read from the issue later.
+    assert run.task_title == "Add a dark mode toggle to settings"
     assert comments_42.called
 
 

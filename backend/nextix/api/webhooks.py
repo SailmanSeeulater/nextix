@@ -58,7 +58,7 @@ async def github_webhook(
 
     log.info("webhook %s %s.%s: %s", delivery_id, event, action, result.note)
     await publish_ticket_changes(session, publisher, result.changed_tickets)
-    for ticket_id in result.start_runs:
+    for ticket_id, (task_title, task_body) in result.start_runs.items():
         ticket = await session.get(Ticket, ticket_id)
         if ticket is None:
             continue
@@ -73,6 +73,8 @@ async def github_webhook(
                 gh=gh,
                 publisher=publisher,
                 enqueue=enqueue,
+                task_title=task_title,
+                task_body=task_body,
             )
         except ActiveRunExists:
             log.info("ticket %s already has an active run", ticket_id)

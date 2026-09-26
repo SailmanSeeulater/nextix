@@ -149,6 +149,8 @@ class Redactor:
         self._secrets = sorted(unique, key=len, reverse=True)
 
     def text(self, value: str) -> str:
+        # NUL can't be stored by the API (Postgres JSONB); drop it here too.
+        value = value.replace("\x00", "")
         for secret in self._secrets:
             value = value.replace(secret, REDACTED)
         return _TOKEN_PATTERN.sub(REDACTED, value)
@@ -606,10 +608,13 @@ def prepare_event(event: Event, redactor: Redactor) -> Event:
     return {"kind": event["kind"], "payload": clipped}
 
 
-def encode_batch(events: Sequence[Event]) -> bytes:
-    return json.dumps(
-        {"events": list(events)}, ensure_ascii=False, separators=(",", ":"), default=str
-    ).encode("utf-8")
+def encode_batch(events: Sequence[Event], batch: int | None = None) -> bytes:
+    """The callback body. ``batch`` numbers batches from 1; a retry resends the same
+    number, so the API can tell a resend from new events and store it only once."""
+    body: dict[str, Any] = {"events": list(events)}
+    if batch is not None:
+        body["batch"] = batch
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
 
 
 def sign(secret: str, body: bytes) -> str:
@@ -1132,6 +1137,7 @@ class EventSink:
         self._on_gone = on_gone
         self._warn = warn
         self._pending: list[Event] = []
+        self._batches_sent = 0
         self._wake = asyncio.Event()
         self._lock = asyncio.Lock()
         self.gone = False
@@ -1175,7 +1181,8 @@ class EventSink:
                 await self.flush()
 
     async def _post(self, batch: list[Event]) -> None:
-        body = encode_batch(batch)
+        self._batches_sent += 1
+        body = encode_batch(batch, self._batches_sent)
         headers = {
             "Content-Type": "application/json",
             SIGNATURE_HEADER: sign(self._secret, body),

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import httpx
 import redis.asyncio as aioredis
+from celery.signals import worker_ready
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -24,7 +25,7 @@ from nextix.config import get_settings
 from nextix.events.stream import RedisPublisher
 from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.client import GitHubClient
-from nextix.runs.executor import WorkerContext, execute_run
+from nextix.runs.executor import WorkerContext, execute_run, sweep_orphans
 from nextix.runs.push import GitBundlePusher
 from nextix.runs.reaper import reap
 from nextix.runs.sandbox import DockerSandbox, Sandbox
@@ -84,6 +85,27 @@ async def _reap(sandbox: Sandbox | None) -> list[uuid.UUID]:
             sandbox=sandbox,
             now=datetime.now(UTC),
         )
+
+
+async def _sweep_on_start(sandbox: Sandbox) -> None:
+    async with worker_context(sandbox=sandbox) as ctx, ctx.sessions() as session:
+        removed = await sweep_orphans(session, ctx)
+    if removed:
+        log.warning("removed %d sandbox(es) left from before this worker started", len(removed))
+
+
+@worker_ready.connect
+def sweep_sandboxes_on_start(**_: object) -> None:
+    """A restarted runner fails the run it was supervising right away, instead of leaving
+    its sandbox running unwatched until the next run starts. Only the runner has the
+    Docker socket, so the ordinary worker skips this."""
+    sandbox = _reaper_sandbox()
+    if sandbox is None:
+        return
+    try:
+        asyncio.run(_sweep_on_start(sandbox))
+    except Exception:
+        log.exception("could not sweep leftover sandboxes on start")
 
 
 @celery_app.task(name="nextix.execute_run")

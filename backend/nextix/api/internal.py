@@ -49,6 +49,21 @@ def _int(value: Any) -> int:
     return value if isinstance(value, int) and value >= 0 else 0
 
 
+async def _read_capped(request: Request, limit: int) -> bytes:
+    """The request body, refusing (413) as soon as it passes `limit`, before buffering it."""
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "event batch too large")
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "event batch too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.post("/internal/runs/{run_id}/events", status_code=status.HTTP_202_ACCEPTED)
 async def run_events(
     run_id: uuid.UUID,
@@ -57,9 +72,7 @@ async def run_events(
     gh: Annotated[GitHubClient, Depends(get_github)],
     publisher: Annotated[EventPublisher, Depends(get_publisher)],
 ) -> dict[str, Any]:
-    body = await request.body()
-    if len(body) > MAX_BODY_BYTES:
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "event batch too large")
+    body = await _read_capped(request, MAX_BODY_BYTES)
 
     run = await session.scalar(select(Run).where(Run.id == run_id).with_for_update())
     if run is None:
@@ -79,6 +92,15 @@ async def run_events(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "expected {'events': [...]}") from exc
     if len(raw_events) > MAX_EVENTS:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "too many events")
+
+    # The runner numbers its batches and resends the same number when it retries (e.g.
+    # after a timeout), so a batch that was already stored is acknowledged, not repeated.
+    batch = data.get("batch")
+    if isinstance(batch, int) and not isinstance(batch, bool) and batch > 0:
+        if batch <= run.last_batch:
+            await session.rollback()
+            return {"stored": 0, "duplicate": True}
+        run.last_batch = batch
 
     now = datetime.now(UTC)
     run.last_heartbeat = now  # any authenticated batch proves the sandbox is alive
@@ -107,7 +129,13 @@ async def run_events(
     # Commits the heartbeat/usage updates along with the transcript rows.
     stored = await store_events(session, publisher, run.id, to_store)
     if start_running:
-        await record_transition(session, run, RunStatus.RUNNING, gh=gh, publisher=publisher)
+        # The commit above released the row lock: re-read under a fresh lock so a cancel
+        # that landed in between isn't overwritten with "running".
+        await session.refresh(run, with_for_update=True)
+        if run.status == RunStatus.CLAIMED:
+            await record_transition(session, run, RunStatus.RUNNING, gh=gh, publisher=publisher)
+        else:
+            await session.rollback()
     else:
         # Even a bare heartbeat is news: the board shows "No heartbeat" after 30 s without one.
         await publish_run(publisher, run)

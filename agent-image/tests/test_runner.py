@@ -363,6 +363,31 @@ async def test_transient_failures_are_retried_and_client_errors_are_not() -> Non
     assert delays == [0.5]
 
 
+async def test_batches_are_numbered_and_a_retry_resends_the_same_number() -> None:
+    answers = iter([503, 200, 200])
+    poster = FakePoster(lambda _events: next(answers))
+    sink = EventSink(
+        url=CALLBACK_URL,
+        secret=SECRET,
+        poster=poster,
+        redactor=Redactor(),
+        sleep=no_sleep,
+        timings=Timings(retry_delays_s=(0.5,)),
+        on_gone=lambda: None,
+        warn=lambda _text: None,
+    )
+    sink.add(make_event("log", text="first"))
+    await sink.flush()
+    sink.add(make_event("log", text="second"))
+    await sink.flush()
+    numbers = [json.loads(body)["batch"] for _, body, _ in poster.requests]
+    assert numbers == [1, 1, 2]  # the API stores a resent batch only once
+
+
+def test_nul_characters_are_dropped() -> None:
+    assert Redactor().text("a\x00b") == "ab"
+
+
 # --------------------------------------------------------------------------- event mapping
 
 

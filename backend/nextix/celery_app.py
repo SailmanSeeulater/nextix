@@ -24,7 +24,8 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     task_track_started=True,
-    # Hard ceiling; individual run tasks set tighter per-run limits.
+    # Defaults for housekeeping tasks. Agent runs get their own limits at enqueue time,
+    # derived from AGENT_DEFAULT_TIMEOUT_MIN (see nextix.api.deps.run_time_limits).
     task_time_limit=60 * 60,
     task_soft_time_limit=55 * 60,
     task_serializer="json",
