@@ -286,6 +286,16 @@ async def sweep_orphans(session: AsyncSession, sandbox: Sandbox) -> set[uuid.UUI
     return orphans
 
 
+async def _has_base_branch(repo: Repo, ctx: WorkerContext) -> bool:
+    try:
+        return await ctx.gh.branch_exists(
+            repo.installation_id, repo.owner, repo.name, repo.default_branch
+        )
+    except Exception:
+        log.exception("could not check %s:%s; trying anyway", repo.full_name, repo.default_branch)
+        return True
+
+
 async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
     async with ctx.sessions() as session:
         try:
@@ -308,6 +318,21 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                 ctx,
                 exit_reason="no_claude_credentials",
                 comment="❌ Failed: no Claude credentials are configured on the server.",
+            )
+            return
+
+        if not await _has_base_branch(repo, ctx):
+            await _finish(
+                session,
+                run,
+                RunStatus.FAILED,
+                ctx,
+                exit_reason="empty_repo",
+                comment=(
+                    f"❌ Failed: `{repo.default_branch}` has no commits yet, so there is "
+                    "nothing to branch from. Push a first commit (a README is enough), "
+                    "then retry."
+                ),
             )
             return
 

@@ -58,6 +58,36 @@ jobs:
       - name: Pytest
         run: pytest -q
 
+  agent-image:
+    name: Agent sandbox (ruff, mypy, pytest, docker build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-image
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent-image/pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Ruff (lint)
+        run: ruff check .
+      - name: Ruff (format)
+        run: ruff format --check .
+      - name: Mypy
+        run: mypy runner.py
+      - name: Pytest
+        run: pytest -q
+      - name: Build the image
+        run: docker build -t nextix-agent:ci .
+      - name: Claude Code runs inside it, as uid 1000
+        run: |
+          docker run --rm --entrypoint claude nextix-agent:ci --version
+          test "$(docker run --rm --entrypoint id nextix-agent:ci -u)" = "1000"
+
   web:
     name: Web (eslint, tsc, vitest)
     runs-on: ubuntu-latest
@@ -83,7 +113,7 @@ jobs:
   compose-smoke:
     name: docker compose smoke test
     runs-on: ubuntu-latest
-    needs: [backend, cli, web]
+    needs: [backend, cli, agent-image, web]
     steps:
       - uses: actions/checkout@v4
       - name: Prepare env

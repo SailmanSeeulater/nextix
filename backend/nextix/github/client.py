@@ -238,6 +238,18 @@ class GitHubClient:
 
     # ------------------------------------------------------------------ runs
 
+    async def branch_exists(self, installation_id: int, owner: str, name: str, branch: str) -> bool:
+        """False for a missing branch, including every branch of an empty repository."""
+        try:
+            await self._get(
+                installation_id, f"/repos/{owner}/{name}/branches/{quote(branch, safe='')}"
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return False
+            raise
+        return True
+
     async def find_open_pull(
         self, installation_id: int, owner: str, name: str, *, branch: str
     ) -> GhPullRequest | None:

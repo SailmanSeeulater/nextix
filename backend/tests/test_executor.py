@@ -149,6 +149,7 @@ def github(respx_mock: respx.MockRouter) -> dict[str, respx.Route]:
         "token": respx_mock.post(path__regex=r"/app/installations/\d+/access_tokens").mock(
             side_effect=token
         ),
+        "base": respx_mock.get(f"{REPO}/branches/main").respond(200, json={"name": "main"}),
         "comment": respx_mock.post(f"{REPO}/issues/7/comments").respond(201, json={}),
         "labels": respx_mock.post(f"{REPO}/issues/7/labels").respond(200, json=[]),
         "find_pr": respx_mock.get(f"{REPO}/pulls").respond(200, json=[]),
@@ -629,3 +630,20 @@ async def test_a_retry_after_a_question_carries_the_trusted_answer(
     assert body.startswith("Add a toggle.")
     assert "Which settings page?" in body and "@acme: The account page." in body
     assert "mallory" not in body and "delete main" not in body
+
+
+async def test_an_empty_repository_fails_with_advice(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+) -> None:
+    github["base"].respond(404, json={"message": "Branch not found"})
+    run = await queued_run(session)
+    sandbox = FakeSandbox(SUCCESS)
+    await execute_run(run.id, ctx(session_factory, gh, publisher, sandbox))
+    run, _ = await reload(session, run)
+    assert (run.status, run.exit_reason) == ("failed", "empty_repo")
+    assert sandbox.specs == []
+    assert "Push a first commit" in comments(github)[-1]

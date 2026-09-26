@@ -65,6 +65,7 @@ class DockerSandbox:
         container = self._docker.containers.run(
             spec.image,
             detach=True,
+            init=True,  # reap processes the agent leaves behind; the runner isn't PID 1
             environment=spec.env,
             labels={RUN_LABEL: str(spec.run_id)},
             network=spec.network,

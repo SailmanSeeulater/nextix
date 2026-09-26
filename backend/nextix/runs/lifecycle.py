@@ -79,6 +79,17 @@ def _comment_for(run: Run, status: str, exit_reason: str | None) -> str | None:
         "usage_limit": "your Claude plan's usage limit was reached",
         "sandbox_error": "the sandbox could not start or crashed",
         "push_failed": "pushing the branch failed",
+        "timeout": "the run hit its time limit",
+        "clone_failed": "the sandbox could not clone the repository",
+        "auth_failed": (
+            "Claude rejected the credential (check CLAUDE_CODE_OAUTH_TOKEN or "
+            "ANTHROPIC_API_KEY in .env)"
+        ),
+        "agent_error": "the agent stopped with an error (see the transcript)",
+        "runner_error": "the sandbox runner crashed (see the transcript)",
+        "no_claude_credentials": "no Claude credentials are configured on the server",
+        "enqueue_failed": "the run could not be handed to a worker",
+        "empty_repo": "the repository has no commits to branch from",
     }
     reason = reasons.get(exit_reason or "", exit_reason or "unknown reason")
     if status == RunStatus.QUEUED:
