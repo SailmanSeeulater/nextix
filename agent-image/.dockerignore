@@ -1,0 +1,12 @@
+# Only runner.py goes into the image; keep the build context small and free of
+# local environments and caches.
+.venv
+tests
+__pycache__
+*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+*.egg-info
+build
+dist
