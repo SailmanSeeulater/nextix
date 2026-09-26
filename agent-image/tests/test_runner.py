@@ -1002,3 +1002,20 @@ async def test_heartbeats_flow_for_the_whole_run(tmp_path: Path, origin: Path) -
     heartbeats = [e for e in poster.events if e["kind"] == "heartbeat"]
     assert len(heartbeats) >= 4
     assert all(e["payload"] == {} for e in heartbeats)
+
+
+def test_token_totals_stream_live_and_each_response_counts_once() -> None:
+    meter = runner.UsageMeter()
+    usage = {"input_tokens": 10, "cache_read_input_tokens": 90, "output_tokens": 5}
+
+    def msg(message_id: str | None) -> AssistantMessage:
+        return AssistantMessage(
+            content=[TextBlock(text="x")], model="m", usage=usage, message_id=message_id
+        )
+
+    first = meter.observe(msg("a"))
+    assert first == {"kind": "usage", "payload": {"input_tokens": 100, "output_tokens": 5}}
+    assert meter.observe(msg("a")) is None  # the same response split in two
+    assert meter.observe(msg(None)) is None  # can't tell responses apart: skip
+    second = meter.observe(msg("b"))
+    assert second is not None and second["payload"] == {"input_tokens": 200, "output_tokens": 10}

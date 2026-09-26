@@ -943,6 +943,35 @@ class Usage:
     num_turns: int = 0
 
 
+_INPUT_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+class UsageMeter:
+    """Running token totals while the agent works, so the board isn't blank until the end.
+
+    One API response can arrive as several AssistantMessages sharing a message_id and the
+    same usage, so each id is counted once. Cost is only known from the final
+    ResultMessage (Claude Code prices it), so live events carry tokens only.
+    """
+
+    def __init__(self) -> None:
+        self._seen: set[str] = set()
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def observe(self, message: object) -> Event | None:
+        if not isinstance(message, AssistantMessage) or not message.usage:
+            return None
+        key = message.message_id
+        if not key or key in self._seen:
+            return None
+        self._seen.add(key)
+        usage = message.usage
+        self.input_tokens += sum(_int(usage.get(k)) for k in _INPUT_KEYS)
+        self.output_tokens += _int(usage.get("output_tokens"))
+        return make_event("usage", input_tokens=self.input_tokens, output_tokens=self.output_tokens)
+
+
 def usage_of(result: ResultMessage | None) -> Usage:
     if result is None:
         return Usage()
@@ -2288,10 +2317,13 @@ async def drive_agent(
     result: ResultMessage | None = None
     last_error: str | None = None
     stream = query_fn(prompt=prompt, options=options)
+    meter = UsageMeter()
     try:
         async for message in stream:
             for event in events_for_message(message):
                 emit(event)
+            if (live := meter.observe(message)) is not None:
+                emit(live)
             if isinstance(message, AssistantMessage) and message.error:
                 last_error = message.error
             elif isinstance(message, ResultMessage):
