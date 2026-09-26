@@ -43,6 +43,14 @@ export function canRetry(column: Column, runs: readonly RunDetail[]): boolean {
   return RETRYABLE.has(column) && activeRun(runs) === null;
 }
 
+/**
+ * "Run again" shows for In Review tickets whose issue is still open: the API cancels any
+ * active run and starts a new one on the same branch (409 on a closed issue).
+ */
+export function canRerun(card: Pick<TicketCard, "column" | "issue_state">): boolean {
+  return card.column === "in_review" && card.issue_state !== "closed";
+}
+
 /** Money and token counts may arrive as strings (Decimal) or be missing; never NaN. */
 export function toNumber(value: unknown): number {
   const n = typeof value === "string" ? Number(value) : value;
@@ -97,6 +105,8 @@ function mergeRun(next: RunDetail, prev: RunDetail | undefined): RunDetail {
     artifacts: base.artifacts ?? other.artifacts,
     tests: base.tests !== undefined ? base.tests : other.tests,
     review_errors: base.review_errors !== undefined ? base.review_errors : other.review_errors,
+    review: base.review !== undefined ? base.review : other.review,
+    model: base.model !== undefined ? base.model : other.model,
     last_heartbeat: laterTime(next.last_heartbeat, prev.last_heartbeat),
     input_tokens: Math.max(toNumber(next.input_tokens), toNumber(prev.input_tokens)),
     output_tokens: Math.max(toNumber(next.output_tokens), toNumber(prev.output_tokens)),
@@ -224,6 +234,7 @@ export function runFields(card: TicketCard, run: RunDetail | null, now: number):
 
   // A queued run has no agent yet; the readout above the notch already says it's waiting.
   if (run.agent_id) fields.push({ label: "Agent", value: run.agent_id });
+  if (run.model) fields.push({ label: "Model", value: run.model });
 
   if (run.status === "queued" && run.queued_at) {
     fields.push({ label: "Queued", value: formatElapsed(run.queued_at, now) });
@@ -296,7 +307,37 @@ export function runReadout(run: RunDetail | null, now: number): RunReadout | nul
   return { state: "live", elapsed: run.started_at ? formatElapsed(run.started_at, now) : "0s" };
 }
 
-/** Option text for the attempt selector: "Attempt 3 · Running". */
+/** "Attempt 3 · Running". */
 export function attemptLabel(run: RunDetail): string {
   return `Attempt ${run.attempt} · ${runWord(run.status)}`;
+}
+
+/** Option text for the attempt selector, with why the run started: "Attempt 3 · Retry · Running". */
+export function attemptOption(run: RunDetail): string {
+  const trigger = triggerWord(run.trigger);
+  return trigger
+    ? `Attempt ${run.attempt} · ${trigger} · ${runWord(run.status)}`
+    : attemptLabel(run);
+}
+
+export interface ReviewNote {
+  /** "@octocat's review", or "a review" when GitHub didn't name the reviewer. */
+  whose: string;
+  url: string | null;
+  /** "3 inline comments"; null when the count is unknown or zero. */
+  comments: string | null;
+}
+
+/** What a review_feedback run is addressing; null for every other run. */
+export function reviewNote(run: RunDetail | null): ReviewNote | null {
+  if (!run || run.trigger !== "review_feedback") return null;
+  const review = run.review;
+  const author = review?.author?.trim();
+  const count = toNumber(review?.comments);
+  return {
+    whose: author ? `@${author}'s review` : "a review",
+    // Only a web link is rendered as one.
+    url: review?.html_url && /^https:\/\//.test(review.html_url) ? review.html_url : null,
+    comments: count > 0 ? `${formatCount(count)} inline ${count === 1 ? "comment" : "comments"}` : null,
+  };
 }

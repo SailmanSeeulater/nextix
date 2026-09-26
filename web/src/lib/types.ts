@@ -50,11 +50,27 @@ export type RunStatus =
   | "needs_input"
   | "cancelled";
 
+/** Why a run started (docs/phase5.md). Typed loosely too, so a future trigger still renders. */
+export type RunTrigger = "initial" | "retry" | "review_feedback";
+
+/** The pull-request review a review_feedback run addresses (docs/phase5.md). */
+export interface RunReview {
+  id: number;
+  /** The reviewer's GitHub login; null when GitHub didn't say. */
+  author: string | null;
+  /** "changes_requested" | "commented"; typed as string so a new state still renders. */
+  state: string;
+  html_url: string | null;
+  /** Inline comments on the review, when they were counted; null (or 0) when unknown. */
+  comments: number | null;
+}
+
 /** One agent run on a ticket, as GET /api/tickets/{id} returns it. */
 export interface RunDetail {
   id: string;
   attempt: number;
-  /** initial | retry | review_feedback */
+  /** A RunTrigger (initial | retry | review_feedback); typed as string so a future trigger
+   * still renders. Null on very old runs. */
   trigger: string | null;
   /** A RunStatus; typed as string so an unknown future status still renders. */
   status: string;
@@ -81,6 +97,11 @@ export interface RunDetail {
   artifacts?: Artifact[];
   /** Review steps that went wrong (setup, app start, a screenshot route, a rejected file). */
   review_errors?: ReviewError[] | null;
+  /** The review a review_feedback run addresses; null for other runs. Optional so an
+   * older API (or a trimmed stream payload) still type-checks; merges keep what we had. */
+  review?: RunReview | null;
+  /** The model the agent ran with (docs/phase6.md: routed by label); null when unrecorded. */
+  model?: string | null;
 }
 
 /** result.json's `tests` (docs/phase4.md). */
@@ -185,6 +206,44 @@ export interface CreateTicketResult {
   board_url: string;
   needs_input: boolean;
   clarifying_question: string | null;
+}
+
+/** What runs cost over some span (docs/phase6.md). */
+export interface CostTotals {
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  runs: number;
+}
+
+export interface CostDay extends CostTotals {
+  /** "YYYY-MM-DD", the UTC day the runs were queued. */
+  date: string;
+}
+
+export interface CostRepo extends CostTotals {
+  repo: string;
+}
+
+export interface CostTicket extends CostTotals {
+  ticket_id: string;
+  repo: string;
+  issue_number: number;
+  title: string;
+}
+
+/** GET /api/costs?days=N */
+export interface CostReport {
+  days: number;
+  /** True on a Claude plan: Claude Code's estimates at API prices, not charges. */
+  estimated: boolean;
+  total: CostTotals;
+  /** Every day in the window, oldest first, no gaps. */
+  by_day: CostDay[];
+  /** Most expensive first. */
+  by_repo: CostRepo[];
+  /** The 20 most expensive tickets, most expensive first. */
+  by_ticket: CostTicket[];
 }
 
 /** Board-stream `run.state` payload: a run on some ticket changed. */

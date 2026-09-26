@@ -4,6 +4,8 @@ import {
   activeRun,
   applyUsage,
   attemptLabel,
+  attemptOption,
+  canRerun,
   canRetry,
   exitReasonWord,
   isActiveStatus,
@@ -13,10 +15,12 @@ import {
   mergeRunSummary,
   mergeRuns,
   noWorkerAvailable,
+  reviewNote,
   runFields,
   runReadout,
   sortRuns,
   toNumber,
+  triggerWord,
   upsertRun,
 } from "./runs";
 import type { RunDetail, TicketCard, TicketDetail } from "./types";
@@ -363,5 +367,89 @@ describe("words", () => {
     expect(toNumber("0.25")).toBe(0.25);
     expect(toNumber(undefined)).toBe(0);
     expect(toNumber("abc")).toBe(0);
+  });
+});
+
+describe("rerun, triggers and reviews (phase 5 and 6)", () => {
+  it("offers Run again only for In Review tickets whose issue is open", () => {
+    expect(canRerun({ column: "in_review", issue_state: "open" })).toBe(true);
+    expect(canRerun({ column: "in_review", issue_state: null })).toBe(true);
+    expect(canRerun({ column: "in_review", issue_state: "closed" })).toBe(false);
+    expect(canRerun({ column: "failed", issue_state: "open" })).toBe(false);
+    expect(canRerun({ column: "done", issue_state: "open" })).toBe(false);
+  });
+
+  it("names each trigger in plain words", () => {
+    expect(triggerWord("initial")).toBe("First run");
+    expect(triggerWord("retry")).toBe("Retry");
+    expect(triggerWord("review_feedback")).toBe("Review feedback");
+    expect(triggerWord("nightly_sweep")).toBe("Nightly sweep");
+    expect(triggerWord(null)).toBeNull();
+  });
+
+  it("puts the trigger in the attempt selector", () => {
+    expect(attemptOption(run({ attempt: 1, trigger: "initial", status: "succeeded" }))).toBe(
+      "Attempt 1 · First run · Succeeded",
+    );
+    expect(attemptOption(run({ attempt: 3, trigger: "review_feedback", status: "running" }))).toBe(
+      "Attempt 3 · Review feedback · Running",
+    );
+    expect(attemptOption(run({ attempt: 2, trigger: null, status: "failed" }))).toBe(
+      "Attempt 2 · Failed",
+    );
+  });
+
+  it("says whose review a feedback run addresses", () => {
+    const review = {
+      id: 9,
+      author: "octocat",
+      state: "changes_requested",
+      html_url: "https://github.com/acme/widgets/pull/8#pullrequestreview-9",
+      comments: 3,
+    };
+    expect(reviewNote(run({ trigger: "review_feedback", review }))).toEqual({
+      whose: "@octocat's review",
+      url: review.html_url,
+      comments: "3 inline comments",
+    });
+    expect(
+      reviewNote(run({ trigger: "review_feedback", review: { ...review, comments: 1 } }))?.comments,
+    ).toBe("1 inline comment");
+  });
+
+  it("copes with a review GitHub said little about", () => {
+    const note = reviewNote(
+      run({
+        trigger: "review_feedback",
+        review: { id: 9, author: null, state: "commented", html_url: "javascript:alert(1)", comments: null },
+      }),
+    );
+    expect(note).toEqual({ whose: "a review", url: null, comments: null });
+    expect(reviewNote(run({ trigger: "review_feedback", review: null }))).toEqual({
+      whose: "a review",
+      url: null,
+      comments: null,
+    });
+  });
+
+  it("has no review note for other runs", () => {
+    expect(reviewNote(run({ trigger: "retry" }))).toBeNull();
+    expect(reviewNote(null)).toBeNull();
+  });
+
+  it("shows the model when the run recorded one", () => {
+    const fields = runFields(card(), run({ model: "claude-opus-5-5" }), NOW);
+    expect(field(fields, "Model")?.value).toBe("claude-opus-5-5");
+    expect(field(runFields(card(), run({ model: null }), NOW), "Model")).toBeUndefined();
+  });
+
+  it("keeps the review and model when a stream payload leaves them out", () => {
+    const review = { id: 9, author: "octocat", state: "commented", html_url: null, comments: 2 };
+    const known = run({ trigger: "review_feedback", review, model: "claude-haiku-4-5" });
+    const streamed = run({ trigger: "review_feedback", status: "succeeded" });
+    delete streamed.review;
+    delete streamed.model;
+    const [merged] = upsertRun([known], streamed);
+    expect(merged).toMatchObject({ status: "succeeded", review, model: "claude-haiku-4-5" });
   });
 });

@@ -5,10 +5,12 @@ import {
   createTicket,
   describeError,
   fetchArtifactText,
+  fetchCosts,
   fetchTicketDiff,
   loadRunHistory,
   loadTicketDetail,
   parseLabels,
+  rerunTicket,
   retryTicket,
 } from "./client-api";
 
@@ -270,5 +272,75 @@ describe("fetchArtifactText", () => {
 describe("parseLabels", () => {
   it("splits, trims and de-duplicates", () => {
     expect(parseLabels(" ui, p1 ,,ui ")).toEqual(["ui", "p1"]);
+  });
+});
+
+describe("rerunTicket", () => {
+  it("posts to the ticket's rerun endpoint and returns the new run", async () => {
+    let called: { url: string; method?: string } | undefined;
+    const fake = (async (url: string, init?: RequestInit) => {
+      called = { url, method: init?.method };
+      return new Response(JSON.stringify({ id: "r3", attempt: 3, status: "queued" }), {
+        status: 201,
+      });
+    }) as unknown as typeof fetch;
+    await expect(rerunTicket("t 1", fake)).resolves.toMatchObject({ id: "r3", status: "queued" });
+    expect(called).toEqual({ url: "/api/tickets/t%201/rerun", method: "POST" });
+  });
+
+  it("prefers the API's sentence, and explains a closed issue or a queue that is down", async () => {
+    await expect(
+      rerunTicket("t1", respond(409, { detail: "the issue is closed; reopen it first" })),
+    ).rejects.toThrow("the issue is closed; reopen it first");
+    await expect(rerunTicket("t1", respond(409, {}))).rejects.toThrow(/Reopen it on GitHub/);
+    await expect(rerunTicket("t1", respond(503, {}))).rejects.toThrow(/run queue/);
+  });
+
+  it("explains an unreachable server", async () => {
+    const down = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+    await expect(rerunTicket("t1", down)).rejects.toThrow(/Can't reach nexTix/);
+  });
+});
+
+describe("fetchCosts", () => {
+  const body = {
+    days: 7,
+    estimated: true,
+    total: { cost_usd: "2.5", input_tokens: 10, output_tokens: 5, runs: 2 },
+    by_day: [{ date: "2026-09-26", cost_usd: 2.5, input_tokens: 10, output_tokens: 5, runs: 2 }],
+    by_repo: [],
+    by_ticket: [],
+  };
+
+  it("asks for the window and reads the report", async () => {
+    let url = "";
+    const fake = (async (u: string) => {
+      url = u;
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const report = await fetchCosts(7, fake);
+    expect(url).toBe("/api/costs?days=7");
+    expect(report.total.cost_usd).toBe(2.5);
+    expect(report.estimated).toBe(true);
+  });
+
+  it("explains errors and a body it can't read", async () => {
+    await expect(fetchCosts(7, respond(503, {}))).rejects.toThrow(/unavailable/);
+    await expect(fetchCosts(7, respond(200, { nope: true }))).rejects.toThrow(/shape/);
+    const down = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+    await expect(fetchCosts(7, down)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("lets an aborted request stay aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fake = (async () => {
+      throw new DOMException("aborted", "AbortError");
+    }) as unknown as typeof fetch;
+    await expect(fetchCosts(7, fake, controller.signal)).rejects.toThrow("aborted");
   });
 });

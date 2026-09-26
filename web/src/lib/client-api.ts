@@ -3,7 +3,9 @@
  * API token server-side; the browser never sees it.
  */
 import { isArtifactUrl } from "./artifacts";
+import { readCostReport } from "./costs";
 import type {
+  CostReport,
   CreateTicketResult,
   RunDetail,
   RunEvent,
@@ -231,6 +233,62 @@ export async function retryTicket(
     );
   }
   return (await res.json()) as RunDetail;
+}
+
+/**
+ * Cancel any active run and queue a new one on the same branch
+ * (POST /api/tickets/{id}/rerun, docs/phase5.md).
+ */
+export async function rerunTicket(
+  ticketId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<RunDetail> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`/api/tickets/${encodeURIComponent(ticketId)}/rerun`, {
+      method: "POST",
+    });
+  } catch {
+    throw new ApiError(UNREACHABLE);
+  }
+  if (!res.ok) {
+    throw new ApiError(
+      await describeError(res, {
+        404: "This ticket is no longer on the board.",
+        409: "The issue is closed. Reopen it on GitHub to run again.",
+        503: "The run queue isn't answering. Try again in a moment.",
+      }),
+    );
+  }
+  return (await res.json()) as RunDetail;
+}
+
+/** What runs cost over the last `days` days (GET /api/costs?days=N, docs/phase6.md). */
+export async function fetchCosts(
+  days: number,
+  fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
+): Promise<CostReport> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`/api/costs?days=${encodeURIComponent(String(days))}`, {
+      cache: "no-store",
+      signal,
+    });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new ApiError(UNREACHABLE);
+  }
+  if (!res.ok) throw new ApiError(await describeError(res));
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    body = null;
+  }
+  const report = readCostReport(body);
+  if (!report) throw new ApiError("The costs came back in a shape this page doesn't understand.");
+  return report;
 }
 
 /**

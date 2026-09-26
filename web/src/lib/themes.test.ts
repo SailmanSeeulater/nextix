@@ -107,6 +107,15 @@ describe.each(THEMES.map((t) => [t.name, t] as const))("%s", (_name, theme) => {
     expect(deltaE(hex(t.raised), rail), "selected segment vs rail").toBeGreaterThanOrEqual(0.02);
   });
 
+  // Phase 5 and 6: the board's drag notes and rerun question float on the pane; the costs
+  // chart's bars are ink-2 on the ground.
+  it("keeps drag notes, the rerun question and the cost bars readable", () => {
+    expect(contrast(hex(t.ink), hex(t.pane)), "board note").toBeGreaterThanOrEqual(AA);
+    expect(contrast(hex(t.ink2), hex(t.pane)), "rerun question context").toBeGreaterThanOrEqual(AA);
+    expect(contrast(hex(t.red), hex(t.pane)), "error glyph on a note").toBeGreaterThanOrEqual(3);
+    expect(contrast(hex(t.ink2), hex(t.bg)), "cost bar").toBeGreaterThanOrEqual(3);
+  });
+
   it("keeps pass and fail marks visible on the test report and check list", () => {
     expect(contrast(hex(t.green), hex(t.raised)), "passed glyph").toBeGreaterThanOrEqual(3);
     expect(contrast(hex(t.red), hex(t.raised)), "Tests failed").toBeGreaterThanOrEqual(AA);

@@ -196,6 +196,23 @@ a {
   text-decoration: underline;
 }
 
+/* A quiet way to the costs page: ink-2 like the other tools, glyph and word. */
+.topbar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.topbar-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
 .signal {
   display: inline-flex;
   align-items: center;
@@ -570,15 +587,25 @@ a.button {
 }
 
 @media (max-width: 767px) {
+  .topbar {
+    gap: 12px;
+  }
+
+  /* The repo filter gives way first, so the tools fit a 375px screen without scrolling. */
   .topbar-tools {
+    min-width: 0;
     gap: 10px;
   }
 
   .topbar-tools .select {
+    flex: 0 1 auto;
+    min-width: 0;
     max-width: 150px;
   }
 
-  /* On phones the live dot speaks for itself; the word stays for screen readers. */
+  /* On phones the live dot and the chart glyph speak for themselves; the words stay for
+     screen readers. */
+  .topbar-link-word,
   .signal-text {
     position: absolute;
     width: 1px;
@@ -922,6 +949,162 @@ a.button {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ------------------------------------------------------------------ drag actions */
+
+/* A pass that can go back to Todo: press and hold on touch, so swipes still scroll. */
+.pass[data-draggable="true"] {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
+
+/* The pass left behind while its copy follows the pointer. */
+.pass[data-dragging="true"] {
+  opacity: 0.4;
+}
+
+.pass[data-ghost="true"] {
+  cursor: grabbing;
+  box-shadow: var(--shadow-float);
+}
+
+.stacks > section {
+  border-radius: 18px;
+}
+
+/* Todo invites the drop with a focus-colored outline; the pointer over it fills it in. */
+.stacks > section[data-drop="ready"] {
+  outline: 2px dashed var(--ring);
+  outline-offset: 6px;
+}
+
+.stacks > section[data-drop="ready"][data-over="true"] {
+  outline-style: solid;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.segment[data-drop="ready"] {
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+
+.segment[data-drop="ready"][data-over="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* Retry / Run again on an open pass: a small ringed pill in the pass's own ink, next to
+   its links, so it reads as an action rather than a link. */
+/* The pill's ring sits outside the line box, so the row keeps the links' height; the row
+   gets extra room below so the next pass in the stack doesn't clip the ring. */
+.pass-links:has(.pass-action) {
+  padding-bottom: 20px;
+}
+
+.pass-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: -2px 0 -2px auto;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pass-ink) 45%, transparent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--pass-ink);
+  cursor: pointer;
+}
+
+.pass-action:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--pass-ink);
+}
+
+.pass-action:focus-visible {
+  outline-color: var(--pass-ink);
+}
+
+.pass-action:disabled {
+  cursor: progress;
+}
+
+/* A refusal or an error after a drag: a note that floats over the board, then clears.
+   Empty, it has no box at all. */
+.board-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 20;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 32px));
+  transform: translateX(-50%);
+}
+
+.board-notice:not(:empty) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--pane);
+  box-shadow: var(--shadow-float);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink);
+  animation: jump-in 200ms var(--ease-out);
+}
+
+.board-notice svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--ink-3);
+}
+
+.board-notice[data-tone="error"] svg {
+  color: var(--danger);
+}
+
+/* A question before something that can't be taken back. */
+.confirm-dialog {
+  width: min(420px, calc(100vw - 32px));
+  margin: auto;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--pane);
+  color: var(--ink);
+  box-shadow: var(--shadow-float);
+}
+
+.confirm-dialog::backdrop {
+  background: color-mix(in srgb, var(--shadow) 55%, transparent);
+}
+
+.confirm-context {
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.confirm-question {
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 20px;
 }
 
 /* ------------------------------------------------------------------ sign in */
@@ -1283,6 +1466,25 @@ a.button {
   padding: 14px 20px 20px;
 }
 
+.detail-pass-review a {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 650;
+  color: var(--pass-ink);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--pass-ink) 45%, transparent);
+}
+
+.detail-pass-review a:hover {
+  text-decoration-color: currentColor;
+}
+
+.detail-pass-review a:focus-visible {
+  outline-color: var(--pass-ink);
+  border-radius: 4px;
+}
+
 .detail-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1300,7 +1502,7 @@ a.button {
 }
 
 .attempt-picker .select {
-  max-width: 260px;
+  max-width: 340px;
 }
 
 .cancel-confirm {
@@ -2708,6 +2910,314 @@ a.shot-frame:hover {
 .check-link:hover {
   color: var(--ink);
   text-decoration-color: currentColor;
+}
+
+/* ------------------------------------------------------------------ costs */
+
+.costs-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin: 6px 0 20px;
+}
+
+.costs-title {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.costs-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.costs-range {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.costs-estimate p {
+  max-width: 72ch;
+}
+
+/* Switching windows keeps the last report up, dimmed, until the new one lands. */
+.costs-body[data-stale="true"] > :not(.costs-updating) {
+  opacity: 0.55;
+  transition: opacity 160ms var(--ease-out);
+}
+
+.costs-updating {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+/* The totals: a Todo-colored pass whose primary field is the cost. */
+.costs-pass {
+  --pass-bg: var(--pass-todo);
+  --pass-ink: var(--pass-todo-ink);
+}
+
+.costs-pass-head {
+  padding: 16px 20px 20px;
+}
+
+.costs-pass .pass-strip {
+  font-size: 11.5px;
+}
+
+.costs-pass .pass-repo {
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+
+.costs-pass-label {
+  margin-top: 14px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pass-label);
+}
+
+.costs-readout {
+  margin-top: 4px;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.costs-pass .pass-fields {
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 14px 18px;
+  padding: 16px 20px 20px;
+}
+
+.costs-pass .pass-field dd {
+  font-size: 15px;
+}
+
+.costs-section {
+  margin-top: 32px;
+}
+
+.costs-heading {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* Per-day bars: axis values on the left, the plot stretched to the width. */
+.cost-chart {
+  margin: 0;
+}
+
+.cost-chart-plot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 180px auto;
+  column-gap: 10px;
+}
+
+.cost-chart-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  min-width: 3ch;
+  margin: -7px 0;
+  font-size: 11.5px;
+  line-height: 14px;
+  color: var(--ink-3);
+}
+
+/* With nothing to scale, only "$0" shows, beside the baseline. */
+.cost-chart-axis > :only-child {
+  margin-top: auto;
+}
+
+.cost-chart-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.cost-bar {
+  fill: var(--ink-2);
+}
+
+.cost-bar:hover {
+  fill: var(--ink);
+}
+
+.cost-grid {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.cost-baseline {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.cost-chart-dates {
+  grid-column: 2;
+  position: relative;
+  height: 18px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.cost-chart-dates > span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.cost-chart-dates > span[data-edge="start"] {
+  left: 0;
+  transform: none;
+}
+
+.cost-chart-dates > span[data-edge="end"] {
+  right: 0;
+  transform: none;
+}
+
+.cost-chart-caption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+/* Breakdowns: hairline rows on the ground, numbers right-aligned in tabular figures. */
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.cost-table thead th {
+  padding: 0 10px 8px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--ink-3);
+}
+
+.cost-table td,
+.cost-table tbody th {
+  padding: 10px;
+  border-top: 1px solid var(--line);
+  vertical-align: baseline;
+}
+
+.cost-table tr > :first-child {
+  padding-left: 2px;
+}
+
+.cost-table tr > :last-child {
+  padding-right: 2px;
+}
+
+.cost-table tbody tr:hover {
+  background: var(--overlay);
+}
+
+.cost-table .cost-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+.cost-table .cost-money {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.cost-name {
+  width: 100%;
+  font-weight: 500;
+  text-align: left;
+}
+
+.cost-title {
+  display: block;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+a.cost-title {
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+}
+
+a.cost-title:hover {
+  text-decoration-color: currentColor;
+}
+
+.cost-where {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 639px) {
+  .costs-head .segmented {
+    width: 100%;
+  }
+
+  .costs-head .segmented button {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .costs-readout {
+    font-size: 30px;
+  }
+
+  .costs-pass-head {
+    padding: 14px 16px 18px;
+  }
+
+  .costs-pass .pass-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 14px 16px 18px;
+  }
+
+  .cost-chart-plot {
+    grid-template-rows: 150px auto;
+  }
+
+  /* Token columns fold away on phones; cost and runs are what fits. */
+  .cost-table .cost-tokens {
+    display: none;
+  }
 }
 
 /* ------------------------------------------------------------------ notice page */

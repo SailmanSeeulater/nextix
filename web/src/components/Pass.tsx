@@ -1,9 +1,19 @@
 "use client";
 
-import { ArrowRight, ArrowUpRight, Clock, FlaskConical, TriangleAlert } from "lucide-react";
+import type { DraggableSyntheticListeners } from "@dnd-kit/core";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Clock,
+  FlaskConical,
+  LoaderCircle,
+  RotateCcw,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { COLUMNS, headerField, liveness, passFields } from "@/lib/board";
+import { ACTION_WORDS, type PassAction } from "@/lib/drag";
 import type { TicketCard } from "@/lib/types";
 import { COLUMN_ICONS } from "./columnIcons";
 
@@ -17,6 +27,11 @@ export function Pass({
   transitionName,
   repoLabel,
   onToggle,
+  action = null,
+  pending = false,
+  onAction,
+  drag,
+  ghost = false,
 }: {
   card: TicketCard;
   /** Short repo name for the strip; the full name stays available to assistive tech. */
@@ -26,6 +41,19 @@ export function Pass({
   fresh: boolean;
   transitionName: string;
   onToggle: () => void;
+  /** Retry or Run again, offered on the open pass (the keyboard way to do what a drag does). */
+  action?: PassAction | null;
+  /** An action was sent and the board hasn't moved the pass yet. */
+  pending?: boolean;
+  onAction?: () => void;
+  /** Set when the pass can be dragged onto Todo. */
+  drag?: {
+    setNodeRef: (el: HTMLElement | null) => void;
+    listeners: DraggableSyntheticListeners;
+    dragging: boolean;
+  };
+  /** The copy that follows the pointer during a drag: hidden from assistive tech, no ids. */
+  ghost?: boolean;
 }) {
   const Icon = COLUMN_ICONS[card.column];
   const live = liveness(card, now);
@@ -40,18 +68,25 @@ export function Pass({
 
   return (
     <article
+      ref={drag?.setNodeRef}
+      {...drag?.listeners}
       className="pass"
       data-column={card.column}
       data-open={open}
       data-stale={stalled || undefined}
       data-fresh={fresh || undefined}
+      data-draggable={drag ? true : undefined}
+      data-dragging={drag?.dragging || undefined}
+      data-ghost={ghost || undefined}
+      aria-hidden={ghost || undefined}
       style={style}
     >
       <button
         type="button"
         className="pass-toggle"
         aria-expanded={open}
-        aria-controls={bodyId}
+        aria-controls={ghost ? undefined : bodyId}
+        tabIndex={ghost ? -1 : undefined}
         onClick={onToggle}
       >
         <span className="pass-strip">
@@ -72,9 +107,16 @@ export function Pass({
             Tests failing
           </span>
         ) : null}
+        {pending ? (
+          <span className="pass-flag">
+            <LoaderCircle size={13} strokeWidth={2.5} className="spin" aria-hidden />
+            <span className="sr-only">, </span>
+            Queuing…
+          </span>
+        ) : null}
       </button>
 
-      <div className="pass-body" id={bodyId} inert={!open}>
+      <div className="pass-body" id={ghost ? undefined : bodyId} inert={!open || ghost}>
         <div>
           <div className="notch-cut" aria-hidden>
             <span />
@@ -104,6 +146,22 @@ export function Pass({
                 Pull request #{card.pr_number}
                 <ArrowUpRight size={14} strokeWidth={2.5} aria-hidden />
               </a>
+            ) : null}
+            {action && onAction ? (
+              <button
+                type="button"
+                className="pass-action"
+                onClick={onAction}
+                disabled={pending}
+                aria-busy={pending || undefined}
+              >
+                {pending ? (
+                  <LoaderCircle size={14} strokeWidth={2.5} className="spin" aria-hidden />
+                ) : (
+                  <RotateCcw size={14} strokeWidth={2.5} aria-hidden />
+                )}
+                {pending ? "Queuing…" : ACTION_WORDS[action]}
+              </button>
             ) : null}
           </div>
         </div>

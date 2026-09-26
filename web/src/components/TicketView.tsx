@@ -28,20 +28,24 @@ import {
 import { hasScreenshots } from "@/lib/artifacts";
 import { COLUMNS, HEARTBEAT_RECHECK_INTERVAL_MS, heartbeatNeedsRecheck } from "@/lib/board";
 import { summarizeChecks } from "@/lib/checks";
-import { ApiError, cancelRun, loadTicketDetail, retryTicket } from "@/lib/client-api";
+import { ApiError, cancelRun, loadTicketDetail, rerunTicket, retryTicket } from "@/lib/client-api";
+import { RERUN_QUESTION } from "@/lib/drag";
 import {
   activeRun,
   applyUsage,
-  attemptLabel,
+  attemptOption,
+  canRerun,
   canRetry,
   mergeCard,
   mergeRunSummary,
   mergeRuns,
   noWorkerAvailable,
   runFields,
+  reviewNote,
   runReadout,
   sortRuns,
   upsertRun,
+  type ReviewNote,
   type RunReadout,
 } from "@/lib/runs";
 import {
@@ -101,9 +105,10 @@ export function TicketView({
   }));
   /** null follows the newest run, so a retry switches to it. */
   const [chosenRunId, setChosenRunId] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"retry" | "cancel" | null>(null);
+  const [busy, setBusy] = useState<"retry" | "rerun" | "cancel" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [confirmingRerun, setConfirmingRerun] = useState(false);
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
   const now = useNow(renderedAt, 1000);
@@ -240,6 +245,8 @@ export function TicketView({
   }
 
   const retryable = !removed && canRetry(detail.column, runs);
+  const rerunnable = !removed && canRerun(detail);
+  const review = reviewNote(selected);
   const readout = runReadout(selected, now);
   const stalled = readout?.state === "stalled";
   const Icon = COLUMN_ICONS[detail.column];
@@ -251,6 +258,22 @@ export function TicketView({
       const run = await retryTicket(ticketId);
       setDetail((d) => ({ ...d, runs: upsertRun(d.runs, run) }));
       setChosenRunId(null);
+    } catch (err) {
+      setError(describe(err));
+    } finally {
+      setBusy(null);
+      refresh();
+    }
+  }
+
+  async function rerun() {
+    setBusy("rerun");
+    setError(null);
+    try {
+      const run = await rerunTicket(ticketId);
+      setDetail((d) => ({ ...d, runs: upsertRun(d.runs, run) }));
+      setChosenRunId(null);
+      setConfirmingRerun(false);
     } catch (err) {
       setError(describe(err));
     } finally {
@@ -332,6 +355,8 @@ export function TicketView({
           ))}
         </dl>
 
+        {review ? <ReviewLine review={review} /> : null}
+
         {selected?.question ? (
           <div className="detail-pass-question">
             <p className="detail-pass-question-label">The agent asked</p>
@@ -373,7 +398,7 @@ export function TicketView({
             >
               {runs.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {attemptLabel(r)}
+                  {attemptOption(r)}
                 </option>
               ))}
             </select>
@@ -381,7 +406,7 @@ export function TicketView({
         ) : null}
 
         <div className="detail-buttons">
-          {active ? (
+          {active && !confirmingRerun ? (
             <CancelControl
               run={active}
               stopping={stoppingRunId === active.id}
@@ -393,6 +418,21 @@ export function TicketView({
               }}
               onDismiss={() => setConfirmingCancel(false)}
               onConfirm={() => void cancel(active)}
+            />
+          ) : null}
+          {rerunnable && !confirmingCancel ? (
+            <RerunControl
+              confirming={confirmingRerun}
+              busy={busy === "rerun"}
+              disabled={busy !== null}
+              onAsk={() => {
+                setError(null);
+                // Only a run that is still going needs a yes: rerun cancels it first.
+                if (active) setConfirmingRerun(true);
+                else void rerun();
+              }}
+              onDismiss={() => setConfirmingRerun(false)}
+              onConfirm={() => void rerun()}
             />
           ) : null}
           {retryable ? (
@@ -671,6 +711,81 @@ function CancelControl({
       <Square size={14} strokeWidth={2.5} aria-hidden />
       Cancel run
     </button>
+  );
+}
+
+/** "Run again" for an In Review ticket; asks first when it would stop a running agent. */
+function RerunControl({
+  confirming,
+  busy,
+  disabled,
+  onAsk,
+  onConfirm,
+  onDismiss,
+}: {
+  confirming: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onAsk: () => void;
+  onConfirm: () => void;
+  onDismiss: () => void;
+}) {
+  const icon = busy ? (
+    <LoaderCircle size={16} className="spin" aria-hidden />
+  ) : (
+    <RotateCcw size={16} strokeWidth={2.5} aria-hidden />
+  );
+  if (confirming) {
+    return (
+      <span className="cancel-confirm" role="group" aria-label="Confirm run again">
+        <span className="cancel-confirm-text">{RERUN_QUESTION}</span>
+        <button
+          type="button"
+          className="button"
+          data-variant="secondary"
+          onClick={onConfirm}
+          disabled={disabled}
+          aria-busy={busy || undefined}
+        >
+          {icon}
+          {busy ? "Queuing…" : "Run again"}
+        </button>
+        <button type="button" className="link-button" onClick={onDismiss} disabled={busy}>
+          Keep running
+        </button>
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="button"
+      data-variant="secondary"
+      onClick={onAsk}
+      disabled={disabled}
+      aria-busy={busy || undefined}
+    >
+      {icon}
+      {busy ? "Queuing…" : "Run again"}
+    </button>
+  );
+}
+
+/** Which review a feedback run is addressing, linked to it on GitHub. */
+function ReviewLine({ review }: { review: ReviewNote }) {
+  return (
+    <p className="detail-pass-note detail-pass-review">
+      Addressing{" "}
+      {review.url ? (
+        <a href={review.url} target="_blank" rel="noreferrer">
+          {review.whose}
+          <ArrowUpRight size={13} strokeWidth={2.5} aria-hidden />
+        </a>
+      ) : (
+        review.whose
+      )}
+      {review.comments ? <span className="tabular"> · {review.comments}</span> : null}
+    </p>
   );
 }
 
