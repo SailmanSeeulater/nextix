@@ -84,7 +84,6 @@ async def run_events(
     run.last_heartbeat = now  # any authenticated batch proves the sandbox is alive
     to_store: list[tuple[str, dict[str, Any]]] = []
     start_running = False
-    usage_changed = False
     for item in raw_events:
         if not isinstance(item, dict) or not isinstance(item.get("kind"), str):
             continue
@@ -103,14 +102,14 @@ async def run_events(
             cost = payload.get("cost_usd")
             if isinstance(cost, int | float) and cost >= 0:
                 run.cost_usd = max(run.cost_usd, Decimal(str(round(cost, 4))))
-            usage_changed = True
         to_store.append((kind, payload))
 
     # Commits the heartbeat/usage updates along with the transcript rows.
     stored = await store_events(session, publisher, run.id, to_store)
     if start_running:
         await record_transition(session, run, RunStatus.RUNNING, gh=gh, publisher=publisher)
-    elif usage_changed:
+    else:
+        # Even a bare heartbeat is news: the board shows "No heartbeat" after 30 s without one.
         await publish_run(publisher, run)
         await publish_ticket_changes(session, publisher, {run.ticket_id})
     return {"stored": len(stored)}

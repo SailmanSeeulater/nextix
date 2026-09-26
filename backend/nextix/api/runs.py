@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette import EventSourceResponse
@@ -82,7 +82,11 @@ async def run_stream(
     run_id: uuid.UUID,
     client: Annotated[aioredis.Redis, Depends(get_redis)],
     sessions: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> EventSourceResponse:
+    """Replay the run's stored events, then tail live ones. A reconnecting EventSource
+    sends Last-Event-ID, and only events after it are replayed."""
+    after = int(last_event_id) if last_event_id and last_event_id.isdigit() else 0
     async with sessions() as session:
         if await session.get(Run, run_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no such run")
@@ -93,7 +97,9 @@ async def run_stream(
         async with subscription(client, run_channel(run_id)) as messages:
             async with sessions() as session:
                 rows = await session.scalars(
-                    select(RunEvent).where(RunEvent.run_id == run_id).order_by(RunEvent.id)
+                    select(RunEvent)
+                    .where(RunEvent.run_id == run_id, RunEvent.id > after)
+                    .order_by(RunEvent.id)
                 )
                 for row in rows:
                     yield {

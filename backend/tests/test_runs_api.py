@@ -144,7 +144,7 @@ async def test_callback_for_a_finished_run_is_gone(
 
 
 async def test_heartbeat_touches_the_run_but_not_the_transcript(
-    client: httpx.AsyncClient, session: AsyncSession
+    client: httpx.AsyncClient, session: AsyncSession, publisher: FakePublisher
 ) -> None:
     run = await make_run(session, await make_ticket(session), status="running")
     before = run.last_heartbeat
@@ -152,6 +152,9 @@ async def test_heartbeat_touches_the_run_but_not_the_transcript(
     await session.refresh(run)
     assert run.last_heartbeat and before and run.last_heartbeat > before
     assert (await session.scalars(select(RunEvent))).all() == []
+    # ...and tells the board, which would otherwise show "No heartbeat" after 30 s.
+    [state] = [d for _, e, d in publisher.events if e == "run.state"]
+    assert state["run"]["last_heartbeat"] == run.last_heartbeat.isoformat()
 
 
 async def test_running_state_moves_claimed_to_running_and_comments(
