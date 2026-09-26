@@ -36,6 +36,11 @@ from nextix.tickets.service import NEEDS_INPUT_LABEL, is_trusted
 
 log = logging.getLogger(__name__)
 
+# Both far below Linux's 128 KiB limit on one environment variable (even at 4 bytes a
+# character) and far above any real issue.
+MAX_ISSUE_BODY_CHARS = 20_000
+MAX_CLARIFICATION_CHARS = 8_000
+
 
 class RunResult(BaseModel):
     """/work/.nextix-out/result.json, written by the sandbox runner."""
@@ -86,7 +91,10 @@ def sandbox_env(
 ) -> dict[str, str]:
     """The complete environment contract from docs/phase3.md. Nothing else is passed."""
     body = ticket.body or ""
+    if len(body) > MAX_ISSUE_BODY_CHARS:
+        body = body[:MAX_ISSUE_BODY_CHARS] + "\n\n… [the rest of the issue was cut: too long]"
     if clarification:
+        clarification = clarification[:MAX_CLARIFICATION_CHARS]
         body = f"{body}\n\n{clarification}" if body else clarification
     task = {
         "title": ticket.title,
@@ -104,7 +112,8 @@ def sandbox_env(
         "NEXTIX_DEFAULT_BRANCH": repo.default_branch,
         "NEXTIX_BRANCH": run.branch or f"nextix/issue-{ticket.issue_number}",
         "NEXTIX_ISSUE_NUMBER": str(ticket.issue_number),
-        "NEXTIX_TASK_JSON": json.dumps(task),
+        # Unescaped UTF-8: a single environment variable must stay under Linux's 128 KiB.
+        "NEXTIX_TASK_JSON": json.dumps(task, ensure_ascii=False),
         "NEXTIX_MODEL": settings.anthropic_model,
         "NEXTIX_MAX_TURNS": str(settings.agent_max_turns),
         "NEXTIX_TIMEOUT_MIN": str(settings.agent_default_timeout_min),

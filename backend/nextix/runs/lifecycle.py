@@ -90,6 +90,9 @@ def _comment_for(run: Run, status: str, exit_reason: str | None) -> str | None:
         "no_claude_credentials": "no Claude credentials are configured on the server",
         "enqueue_failed": "the run could not be handed to a worker",
         "empty_repo": "the repository has no commits to branch from",
+        "secret_in_changes": (
+            "the agent's changes contained one of the run's credentials, so nothing was pushed"
+        ),
     }
     reason = reasons.get(exit_reason or "", exit_reason or "unknown reason")
     if status == RunStatus.QUEUED:

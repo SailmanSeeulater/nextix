@@ -647,3 +647,24 @@ async def test_an_empty_repository_fails_with_advice(
     assert (run.status, run.exit_reason) == ("failed", "empty_repo")
     assert sandbox.specs == []
     assert "Push a first commit" in comments(github)[-1]
+
+
+async def test_huge_non_ascii_issues_still_fit_in_one_environment_variable(
+    session: AsyncSession,
+) -> None:
+    run = await queued_run(session)
+    ticket = await session.get(Ticket, run.ticket_id)
+    assert ticket is not None
+    repo = await session.get(Repo, ticket.repo_id)
+    assert repo is not None
+    ticket.body = "漢字" * 100_000
+    env = sandbox_env(
+        settings=settings(),
+        run=run,
+        ticket=ticket,
+        repo=repo,
+        clone_token="t",
+        clarification="答え" * 100_000,
+    )
+    assert len(env["NEXTIX_TASK_JSON"].encode()) < 128 * 1024
+    assert "漢字" in env["NEXTIX_TASK_JSON"]  # plain UTF-8, not 6-byte escapes
