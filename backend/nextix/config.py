@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,23 +15,29 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://nextix:nextix@localhost:5432/nextix"
     redis_url: str = "redis://localhost:6379/0"
 
-    # Anthropic
-    anthropic_api_key: str = ""
+    # Claude credentials (see nextix/claude_auth.py). Secrets are excluded from repr so a
+    # logged or printed Settings object never shows them.
+    anthropic_api_key: str = Field(default="", repr=False)
     anthropic_model: str = "claude-opus-5"
+    # Long-lived token for the owner's Claude Pro/Max plan, from `claude setup-token`.
+    # Used only through Claude Code, and only for the owner's personal use.
+    claude_code_oauth_token: str = Field(default="", repr=False)
+    # auto: the subscription token when set, else the API key.
+    nextix_claude_auth: Literal["auto", "subscription", "api_key"] = "auto"
 
     # GitHub App
     github_app_id: str = ""
     # GitHub recommends the client ID as the JWT issuer; falls back to the app ID.
     github_app_client_id: str = ""
     github_app_private_key_path: Path | None = None
-    github_webhook_secret: str = ""
+    github_webhook_secret: str = Field(default="", repr=False)
     github_bot_login: str = "nextix-bot[bot]"
     github_api_url: str = "https://api.github.com"
     github_web_url: str = "https://github.com"
     github_api_version: str = "2026-03-10"
 
     # nexTix
-    nextix_api_token: str = "change-me"
+    nextix_api_token: str = Field(default="change-me", repr=False)
     nextix_public_url: str = "http://localhost:3000"
     nextix_allowed_github_users: str = ""
 

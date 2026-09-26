@@ -167,9 +167,34 @@ likely files, labeled `nextix`. If the request is too vague, the issue gets the
 `nextix:needs-input` label, Claude's clarifying question is posted as a comment, and the
 card lands in **Needs Input**. `--no-triage` skips Claude and files your text as-is.
 
-Triage needs `ANTHROPIC_API_KEY` in `.env` and uses `ANTHROPIC_MODEL` (default
-`claude-opus-5`). Refused requests are retried on Anthropic's recommended fallback
-model automatically. Claude may only apply labels that already exist in the repo.
+Claude may only apply labels that already exist in the repo. The model is
+`ANTHROPIC_MODEL` (default `claude-opus-5`).
+
+### Paying for Claude: your plan or an API key
+
+nexTix can use either credential, chosen by `NEXTIX_CLAUDE_AUTH` in `.env`:
+
+| Setting | Uses | Billing |
+|---|---|---|
+| `subscription` | `CLAUDE_CODE_OAUTH_TOKEN`, from `claude setup-token` | Your Claude Pro/Max plan's usage limits |
+| `api_key` | `ANTHROPIC_API_KEY`, from the Claude Console | Pay per use |
+| `auto` (default) | The plan token when set, otherwise the API key | Either |
+
+On your plan, triage runs through Claude Code (bundled in the backend image) with no
+tools and none of your local Claude settings. Anthropic allows subscription
+credentials only through Claude Code, and only for your own use: if nexTix is ever
+used by other people, switch to an API key. The board shows which one is active next
+to the "Write it up with Claude" switch, and `/api/health` reports it as `claude`.
+
+To create the plan token (it lasts a year; paste it into `.env`, never into chat or git):
+
+```bash
+claude setup-token
+```
+
+If triage says your plan's usage limit is reached, file tickets without triage until
+it resets. On the API-key path, refused requests are retried on Anthropic's
+recommended fallback model automatically.
 
 ## Developing without compose
 

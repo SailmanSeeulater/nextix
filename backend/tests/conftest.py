@@ -17,6 +17,12 @@ from typing import Any
 os.environ["GITHUB_WEBHOOK_SECRET"] = "test-webhook-secret"
 os.environ["NEXTIX_API_TOKEN"] = "test-api-token"
 os.environ["GITHUB_APP_ID"] = "12345"
+# Tests choose their own Claude credentials; never inherit a developer's real ones.
+# (Set, not removed: an empty environment variable still beats a .env file, which
+# pydantic-settings would otherwise read from the working directory.)
+os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = ""
+os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["NEXTIX_CLAUDE_AUTH"] = "auto"
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://nextix:nextix@localhost:5432/nextix")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 

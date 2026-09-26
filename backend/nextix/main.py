@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -10,14 +11,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from nextix import __version__
 from nextix.api import health, repos, stream, tickets, webhooks
+from nextix.claude_auth import ClaudeAuth, describe_missing, resolve, scrub_competing_credentials
 from nextix.config import get_settings
 from nextix.db.session import get_async_engine
 from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.client import GitHubClient
 from nextix.log_config import configure_logging
-from nextix.tickets.triage import ClaudeTriager
+from nextix.tickets.triage import build_triager
 
 GITHUB_HTTP_TIMEOUT_S = 20.0
+log = logging.getLogger("nextix.main")
 
 
 @asynccontextmanager
@@ -28,9 +31,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         GitHubAppAuth.from_settings(settings, http), http, settings.github_api_url
     )
     app.state.redis = aioredis.Redis.from_url(settings.redis_url)
-    app.state.triager = (
-        ClaudeTriager.from_settings(settings) if settings.anthropic_api_key else None
-    )
+    app.state.claude_auth = resolve(settings)
+    if app.state.claude_auth is ClaudeAuth.SUBSCRIPTION:
+        # Claude Code would bill an API key over the plan token; keep them out of its env.
+        removed = scrub_competing_credentials()
+        if removed:
+            log.info("subscription mode: removed %s from the environment", ", ".join(removed))
+    app.state.triager = build_triager(settings)
+    if app.state.claude_auth is ClaudeAuth.NONE:
+        log.warning("Claude triage is off: %s", describe_missing(settings))
+    else:
+        log.info("Claude triage uses: %s", app.state.claude_auth.value)
     try:
         yield
     finally:

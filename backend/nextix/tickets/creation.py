@@ -109,8 +109,9 @@ async def create_ticket(
     if triage and triager is None:
         raise TicketCreationError(
             503,
-            "Triage needs ANTHROPIC_API_KEY on the server. Set it, or create the ticket "
-            "without triage (--no-triage).",
+            "Triage needs Claude credentials on the server: CLAUDE_CODE_OAUTH_TOKEN (your "
+            "Claude plan, from `claude setup-token`) or ANTHROPIC_API_KEY. Set one in .env, "
+            "or create the ticket without triage (--no-triage).",
         )
     inst = repo.installation_id
     available = await gh.list_labels(inst, repo.owner, repo.name)
