@@ -46,9 +46,21 @@ class NextixApi:
         self._request("GET", "/api/tickets", timeout=DEFAULT_TIMEOUT_S)
 
     def create_ticket(
-        self, *, repo: str, prompt: str, labels: list[str], triage: bool
+        self,
+        *,
+        repo: str,
+        prompt: str,
+        labels: list[str],
+        triage: bool,
+        created_via: str = "cli",
     ) -> dict[str, Any]:
-        body = {"repo": repo, "prompt": prompt, "labels": labels, "triage": triage}
+        body = {
+            "repo": repo,
+            "prompt": prompt,
+            "labels": labels,
+            "triage": triage,
+            "created_via": created_via,
+        }
         result: dict[str, Any] = self._request(
             "POST", "/api/tickets", json=body, timeout=CREATE_TIMEOUT_S
         )
@@ -60,6 +72,12 @@ class NextixApi:
         params = {k: v for k, v in {"repo": repo, "column": column}.items() if v}
         result: list[dict[str, Any]] = self._request(
             "GET", "/api/tickets", params=params, timeout=DEFAULT_TIMEOUT_S
+        )
+        return result
+
+    def get_ticket(self, ticket_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = self._request(
+            "GET", f"/api/tickets/{ticket_id}", timeout=DEFAULT_TIMEOUT_S
         )
         return result
 

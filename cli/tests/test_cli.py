@@ -105,6 +105,7 @@ def test_new_creates_ticket(api: respx.MockRouter) -> None:
         "prompt": "add a dark mode toggle",
         "labels": ["ui", "p1"],
         "triage": True,
+        "created_via": "cli",
     }
     assert "acme/widgets#7" in result.output
     assert CARD["issue_url"] in result.output

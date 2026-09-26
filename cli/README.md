@@ -40,3 +40,18 @@ Claude's question is posted as a comment. `--no-triage` skips Claude and uses yo
 text as-is.
 
 Add `--json` to `new` or `ls` for machine-readable output.
+
+## Use it from Claude Code or Claude Desktop (MCP)
+
+`nextix mcp` runs an MCP server over stdio with three tools: `create_ticket`,
+`list_tickets`, and `get_ticket_status` (by ticket id, `12`, `#12`, or `owner/name#12`).
+It uses the same login as the CLI, so run `nextix login` once first. Register it with
+Claude Code:
+
+```bash
+claude mcp add nextix -- nextix mcp
+```
+
+For Claude Desktop, add an entry under `mcpServers` in its config file with
+`"command": "nextix"` and `"args": ["mcp"]` (use the full path to `nextix` if it isn't on
+your PATH). Tickets created this way are marked `created_via: mcp`.

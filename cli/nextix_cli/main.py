@@ -206,3 +206,17 @@ def open_ticket(
 
 if __name__ == "__main__":  # pragma: no cover
     app()
+
+
+# ------------------------------------------------------------------ mcp
+
+
+@app.command("mcp")
+def mcp_command() -> None:
+    """Run the nexTix MCP server over stdio, for Claude Code or Claude Desktop.
+
+    Register it with:  claude mcp add nextix -- nextix mcp
+    """
+    from nextix_cli.mcp_server import serve
+
+    serve()
