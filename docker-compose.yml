@@ -13,8 +13,8 @@ services:
       POSTGRES_USER: nextix
       POSTGRES_PASSWORD: nextix
       POSTGRES_DB: nextix
-    ports:
-      - "127.0.0.1:5432:5432"
+    # Not published on the host: on Docker Desktop, agent sandboxes can reach anything
+    # published there. To reach it from outside compose, see docker-compose.ports.yml.
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,8 +25,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
+    # Not published on the host (see postgres above).
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

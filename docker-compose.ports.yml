@@ -1,0 +1,14 @@
+# Publishes Postgres and Redis on 127.0.0.1, for running the API, workers, or tests
+# outside compose:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ports.yml up -d postgres redis
+#
+# Don't leave this on while agents run. On Docker Desktop, every port published on your
+# machine is reachable from containers through the host gateway, including sandboxes.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"

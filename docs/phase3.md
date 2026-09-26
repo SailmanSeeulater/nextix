@@ -29,8 +29,13 @@ runner, the worker, the API and the web app agree.
    timeout 30 min, max cost $3, tools Read/Edit/Write/Bash/Glob/Grep.
 9. **Sandboxes get their own network.** They join `nextix_agents`, which only the API
    shares, so they can reach `http://api:8000` (callbacks) and the internet but not
-   Postgres or Redis. Compose publishes Postgres and Redis on 127.0.0.1 only, and the
-   sandbox's `host.docker.internal` / `gateway.docker.internal` point at 127.0.0.1.
+   Postgres or Redis by name. On Docker Desktop, containers can also reach every port
+   published on the host through the host gateway (192.168.65.254), even ports bound to
+   127.0.0.1, so compose no longer publishes Postgres or Redis at all
+   (`docker-compose.ports.yml` opts back in for development). The sandbox's
+   `host.docker.internal` / `gateway.docker.internal` point at 127.0.0.1. Residual risk:
+   a sandbox can still reach the API and web ports (both need the API token) and any
+   other project's published ports on the host. An egress allowlist (proxy) is Phase 6.
 10. **Only the `runner` service has the Docker socket.** It is a Celery worker for the
     `runs` queue (concurrency 1) and runs as root because the socket is root-owned. The
     reaper runs on the ordinary `worker` (no socket): it fails silent runs, and the runner
