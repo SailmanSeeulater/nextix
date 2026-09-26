@@ -85,6 +85,12 @@ class Run(Base):
     __table_args__ = (
         Index("ix_runs_ticket_id_attempt", "ticket_id", text("attempt DESC")),
         Index("ix_runs_status_last_heartbeat", "status", "last_heartbeat"),
+        Index(
+            "uq_runs_one_active_per_ticket",
+            "ticket_id",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'claimed', 'running')"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
@@ -104,6 +110,13 @@ class Run(Base):
     cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 4), nullable=False, server_default=text("0")
     )
+    queued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Per-run HMAC key for sandbox callbacks; cleared when the run finishes. Never logged.
+    callback_secret: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    question: Mapped[str | None] = mapped_column(Text)
 
     ticket: Mapped[Ticket] = relationship(back_populates="runs")
     events: Mapped[list["RunEvent"]] = relationship(back_populates="run", order_by="RunEvent.id")

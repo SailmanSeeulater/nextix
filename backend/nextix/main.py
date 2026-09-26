@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nextix import __version__
-from nextix.api import health, repos, stream, tickets, webhooks
+from nextix.api import health, internal, repos, runs, stream, tickets, webhooks
 from nextix.claude_auth import ClaudeAuth, describe_missing, resolve, scrub_competing_credentials
 from nextix.config import get_settings
 from nextix.db.session import get_async_engine
@@ -61,7 +61,15 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for router in (health.router, repos.router, tickets.router, stream.router, webhooks.router):
+    for router in (
+        health.router,
+        repos.router,
+        tickets.router,
+        runs.router,
+        stream.router,
+        webhooks.router,
+        internal.router,
+    ):
         app.include_router(router, prefix="/api")
     return app
 

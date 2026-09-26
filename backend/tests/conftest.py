@@ -165,3 +165,21 @@ class FakePublisher:
 @pytest.fixture
 def publisher() -> FakePublisher:
     return FakePublisher()
+
+
+class FakeEnqueuer:
+    """Stands in for Celery: records the run ids that would have been queued."""
+
+    def __init__(self) -> None:
+        self.run_ids: list[Any] = []
+        self.fail = False
+
+    def __call__(self, run_id: Any) -> None:
+        if self.fail:
+            raise ConnectionError("broker unreachable")
+        self.run_ids.append(run_id)
+
+
+@pytest.fixture
+def enqueuer() -> FakeEnqueuer:
+    return FakeEnqueuer()
