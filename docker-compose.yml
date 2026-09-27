@@ -108,6 +108,21 @@ services:
       api:
         condition: service_healthy
 
+  # Webhook relay: forwards GitHub's events from the smee.io channel (SMEE_URL, the GitHub
+  # App's webhook URL) to the API, so it runs whenever the stack does. Without SMEE_URL it
+  # just says so and idles.
+  smee:
+    image: node:22-alpine
+    environment:
+      SMEE_URL: ${SMEE_URL:-}
+    command: >
+      sh -c 'if [ -z "$$SMEE_URL" ]; then echo "SMEE_URL is not set in .env: GitHub webhooks are not forwarded"; exec sleep infinity; fi;
+             exec npx --yes smee-client@latest --url "$$SMEE_URL" --target http://api:8000/api/github/webhook'
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
   web:
     build: ./web
     # node_modules lives in a named volume so the host tree stays clean; `npm install`

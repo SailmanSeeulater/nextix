@@ -253,7 +253,16 @@ _CUT = "\n\n… [cut: too long]"
 async def review_comments_for(
     run: Run, ticket: Ticket, repo: Repo, ctx: WorkerContext
 ) -> list[dict[str, Any]]:
-    """The review a review_feedback run answers: its body and inline comments."""
+    """The review a review_feedback run answers: its body and inline comments, or the
+    PR comment it answers."""
+    comment_body = (run.review_meta or {}).get("body")
+    if run.review_id is None and isinstance(comment_body, str) and comment_body.strip():
+        return [
+            {
+                "author": (run.review_meta or {}).get("author"),
+                "body": redact(comment_body)[:MAX_REVIEW_COMMENT_CHARS],
+            }
+        ]
     if run.review_id is None or ticket.pr_number is None:
         return []
     comments: list[dict[str, Any]] = []
@@ -284,6 +293,11 @@ async def review_comments_for(
             }
         )
     return comments
+
+
+def feedback_kind(run: Run) -> str:
+    """ "review" for a pull request review, "comment" for a PR conversation comment."""
+    return "review" if run.review_id is not None else "comment"
 
 
 def tests_line(tests: dict[str, Any] | None) -> str | None:
@@ -878,7 +892,7 @@ async def _conclude(
         ctx,
         comment=(
             (
-                f"✅ Updated PR #{pr['number']} to address @{reviewer}'s review "
+                f"✅ Updated PR #{pr['number']} to address @{reviewer}'s {feedback_kind(run)} "
                 if reviewer
                 else f"✅ {verb} PR #{pr['number']} from `{run.branch}` "
             )

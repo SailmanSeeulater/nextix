@@ -42,6 +42,11 @@ on the same PR that addresses it.
    because GitHub drives state. Keyboard users get the same actions from the ticket page
    (Retry / Run again) and from a pass's menu.
 
+8. **PR conversation comments are feedback.** (Added after live use, 2026-09-27.) A
+   trusted comment on an open nextix PR's conversation starts a `review_feedback` run with
+   the comment as its only review comment (`runs.review_meta.body`); while a run is active
+   the newest such comment waits in `tickets.pending_comment`.
+
 ## API
 
 - `POST /api/tickets/{id}/rerun` → 201 `RunDetail`. Cancels an active run first (like

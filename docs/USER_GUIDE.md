@@ -91,15 +91,20 @@ spaces or quotes) and set `NEXTIX_CLAUDE_AUTH=subscription`. The token lasts one
 
 ### Receive GitHub's webhooks
 
-GitHub has to reach your computer to tell nexTix about label changes, PRs, and merges.
-Your webhook URL is a smee.io channel. Keep this running whenever nexTix is running:
+GitHub has to reach your computer to tell nexTix about labels, comments, reviews, PRs,
+and merges. Your App's webhook URL is a smee.io channel, and the stack includes a `smee`
+service that relays it to the API. Put the channel in `.env` once:
 
-```bash
-npx smee-client --url https://smee.io/<your-channel> --target http://localhost:8010/api/github/webhook
+```
+SMEE_URL=https://smee.io/<your-channel>
 ```
 
-(Tickets you create from the board or CLI still work without it, but the board won't
-notice merges, closed issues, or labels you change on GitHub until it's running again.)
+It then starts and stops with `docker compose up -d` / `down`, and restarts itself if it
+crashes. To check it: `docker compose logs smee` should say "Forwarding https://smee.io/…
+to http://api:8000/api/github/webhook", followed by a `POST … - 200` line for each event.
+
+(Without it, tickets you create from the board or CLI still work, but nexTix won't see
+anything you do on GitHub: labels, comments, reviews, merges.)
 
 ### Build and start
 
@@ -154,8 +159,7 @@ docker compose up -d
 docker compose down
 ```
 
-`down` keeps your data (it lives in a Docker volume). Start smee again whenever you start
-nexTix.
+`down` keeps your data (it lives in a Docker volume).
 
 ### File a ticket
 
@@ -232,7 +236,12 @@ and merge when you're happy. Merging moves the ticket to **Done** and closes the
 
 If it needs changes, you have three options:
 
-- **Review it on GitHub** (the usual way). Leave a review with **Request changes**, or a
+- **Just comment on the PR.** Write what you want changed in the PR's conversation, e.g.
+  "Instead of light blue, do light green". Every comment you write there is treated as a
+  change request: an agent picks it up, commits the change to the same branch, and the
+  closing comment says "✅ Updated PR #n to address @you's comment". (To just chat
+  without starting a run, comment on the issue instead.)
+- **Review it on GitHub.** Leave a review with **Request changes**, or a
   **Comment** review with inline comments on the lines to change. The agent picks it up
   within seconds: "🕒 Queued for an agent … to address @you's review". It gets your
   review's text and every inline comment (file and line), works on the same branch, and
@@ -386,7 +395,7 @@ saved in the browser.
 | **❌ Failed: …has no commits yet** | The repository is empty, so there's nothing to branch from | Push a first commit (a README is enough), then **Retry** |
 | **❌ Failed: `.nextix.yml` on `main` can't be used** | The file has a typo, an unknown key, or a value out of range | The comment lists each problem. Fix the file on `main`, then **Retry** |
 | **⏱️ Timed out** | The run hit its time limit | Split the ticket into smaller ones, or raise `AGENT_DEFAULT_TIMEOUT_MIN` |
-| Labels or merges on GitHub don't show on the board | Webhooks aren't arriving | Start smee (above). Check the App's **Advanced → Recent Deliveries** on GitHub |
+| Labels, comments, reviews or merges on GitHub do nothing | Webhooks aren't reaching nexTix | `docker compose logs smee` (is `SMEE_URL` set? is it forwarding?). GitHub's side: the App's **Advanced → Recent Deliveries** |
 | Board says it can't reach the API | The API container is down | `docker compose ps`, then `docker compose logs api` |
 | "Write it up with Claude" is greyed out | No Claude credential is configured | Set `CLAUDE_CODE_OAUTH_TOKEN` (or an API key) in `.env` and restart |
 
@@ -438,7 +447,7 @@ transcript, and `docker compose logs runner`.
 |---|---|
 | Start everything | `docker compose up -d` |
 | Stop everything | `docker compose down` |
-| Forward webhooks | `npx smee-client --url https://smee.io/<channel> --target http://localhost:8010/api/github/webhook` |
+| Is smee forwarding? | `docker compose logs --tail 20 smee` |
 | Health check | `curl http://localhost:8010/api/health` |
 | Rebuild the agent image | `docker compose build agent` |
 | Follow agent runs | `docker compose logs -f runner` |

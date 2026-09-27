@@ -84,6 +84,11 @@ async def github_webhook(
                 ticket.pending_review_id = start.review_id
                 await session.commit()
                 log.info("ticket %s is busy; review %s is pending", ticket_id, start.review_id)
+            elif start.trigger == "review_feedback" and start.review_meta:
+                # A PR comment while busy: the newest one waits for the active run to end.
+                ticket.pending_comment = start.review_meta
+                await session.commit()
+                log.info("ticket %s is busy; a PR comment is pending", ticket_id)
             else:
                 log.info("ticket %s already has an active run", ticket_id)
         except Exception:

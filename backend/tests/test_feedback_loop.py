@@ -337,3 +337,74 @@ async def test_rerun_cancels_the_active_run_and_starts_another(
     await session.refresh(active)
     assert active.status == "cancelled"
     assert len(enqueuer.run_ids) == 1
+
+
+# ------------------------------------------------------------------ PR conversation comments
+
+
+def pr_comment_payload(*, login: str, body: str = "Make it green instead.") -> dict[str, Any]:
+    payload = load_fixture("issues_labeled.json")
+    payload["action"] = "created"
+    payload["issue"]["number"] = 43  # the PR
+    payload["issue"]["pull_request"] = {"url": "x"}
+    payload["issue"]["labels"] = []
+    payload["comment"] = {
+        "id": 6,
+        "user": {"login": login},
+        "body": body,
+        "html_url": "https://github.com/acme/widgets/pull/43#issuecomment-6",
+    }
+    payload["sender"] = {"login": login}
+    return payload
+
+
+async def test_the_owners_pr_comment_is_feedback(
+    client: httpx.AsyncClient,
+    session: AsyncSession,
+    enqueuer: FakeEnqueuer,
+    issue_comments: respx.Route,
+) -> None:
+    await tracked_ticket(client, session)
+    await deliver(client, "issue_comment", pr_comment_payload(login="acme"))
+    [run_id] = enqueuer.run_ids
+    run = await session.get(Run, run_id)
+    assert run is not None and run.trigger == "review_feedback" and run.review_id is None
+    assert run.review_meta and run.review_meta["body"] == "Make it green instead."
+
+
+@pytest.mark.parametrize("login", ["mallory", "nextix-bot[bot]"])
+async def test_other_pr_comments_are_ignored(
+    client: httpx.AsyncClient, session: AsyncSession, enqueuer: FakeEnqueuer, login: str
+) -> None:
+    await tracked_ticket(client, session)
+    await deliver(client, "issue_comment", pr_comment_payload(login=login))
+    assert enqueuer.run_ids == []
+
+
+async def test_a_pr_comment_during_a_run_waits(
+    client: httpx.AsyncClient, session: AsyncSession, enqueuer: FakeEnqueuer
+) -> None:
+    ticket = await tracked_ticket(client, session)
+    session.add(Run(ticket_id=ticket.id, attempt=1, status="running", branch="nextix/issue-42"))
+    await session.commit()
+    await deliver(client, "issue_comment", pr_comment_payload(login="acme"))
+    assert enqueuer.run_ids == []
+    await session.refresh(ticket)
+    assert ticket.pending_comment and ticket.pending_comment["body"] == "Make it green instead."
+
+
+async def test_the_pr_comment_reaches_the_agent(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    gh: GitHubClient,
+    publisher: FakePublisher,
+    github: dict[str, respx.Route],
+) -> None:
+    run = await queued_run(session)
+    run.trigger = "review_feedback"
+    run.review_meta = {"author": "acme", "state": "commented", "body": "Use green."}
+    await session.commit()
+    sandbox = FakeSandbox(SUCCESS)
+    await execute_run(run.id, ctx(session_factory, gh, publisher, sandbox))
+    task = json.loads(sandbox.specs[0].env["NEXTIX_TASK_JSON"])
+    assert task["review_comments"] == [{"author": "acme", "body": "Use green."}]

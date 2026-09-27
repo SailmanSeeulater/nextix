@@ -210,7 +210,9 @@ async def enqueue_run(
         latest = await session.scalar(
             select(Run).where(Run.ticket_id == ticket_id).order_by(Run.attempt.desc()).limit(1)
         )
-        if latest is not None and latest.review_id is not None:
+        if latest is not None and (
+            latest.review_id is not None or (latest.review_meta or {}).get("body")
+        ):
             trigger, review_id, review_meta = (
                 "review_feedback",
                 latest.review_id,
@@ -257,7 +259,8 @@ async def enqueue_run(
         reviewer = (review_meta or {}).get("author")
         if text and reviewer:
             text = (
-                f"🕒 Queued for an agent (attempt {run.attempt}) to address @{reviewer}'s review."
+                f"🕒 Queued for an agent (attempt {run.attempt}) to address @{reviewer}'s "
+                f"{'review' if review_id is not None else 'comment'}."
             )
         if text:
             await _comment(gh, repo, ticket, text)
@@ -290,7 +293,11 @@ async def start_pending_reviews(
     """Every waiting review whose ticket has no active run any more, however that run
     ended (cancelled, reaped, failed before its sandbox started). Run by the reaper."""
     ticket_ids = list(
-        await session.scalars(select(Ticket.id).where(Ticket.pending_review_id.is_not(None)))
+        await session.scalars(
+            select(Ticket.id).where(
+                Ticket.pending_review_id.is_not(None) | Ticket.pending_comment.is_not(None)
+            )
+        )
     )
     await session.commit()
     started = []
@@ -308,6 +315,42 @@ async def start_pending_reviews(
     return started
 
 
+async def _start_pending_comment(
+    session: AsyncSession,
+    ticket: Ticket,
+    *,
+    gh: GitHubClient,
+    publisher: EventPublisher,
+    enqueue: RunEnqueuer,
+) -> Run | None:
+    if await active_run(session, ticket.id) is not None:
+        return None
+    meta = ticket.pending_comment
+    ticket.pending_comment = None
+    await session.commit()
+    if not meta or ticket.pr_state != "open" or ticket.issue_state != "open":
+        return None
+    latest = await session.scalar(
+        select(Run).where(Run.ticket_id == ticket.id).order_by(Run.attempt.desc()).limit(1)
+    )
+    try:
+        return await enqueue_run(
+            session,
+            ticket,
+            trigger="review_feedback",
+            gh=gh,
+            publisher=publisher,
+            enqueue=enqueue,
+            task_title=latest.task_title if latest else None,
+            task_body=latest.task_body if latest else None,
+            review_meta=meta,
+        )
+    except ActiveRunExists:
+        ticket.pending_comment = meta
+        await session.commit()
+        return None
+
+
 async def start_pending_review(
     session: AsyncSession,
     ticket_id: uuid.UUID,
@@ -318,7 +361,13 @@ async def start_pending_review(
 ) -> Run | None:
     """Queue the feedback run for a review that arrived while another run was active."""
     ticket = await session.get(Ticket, ticket_id, populate_existing=True)
-    if ticket is None or ticket.pending_review_id is None:
+    if ticket is None:
+        return None
+    if ticket.pending_review_id is None and ticket.pending_comment:
+        return await _start_pending_comment(
+            session, ticket, gh=gh, publisher=publisher, enqueue=enqueue
+        )
+    if ticket.pending_review_id is None:
         return None
     review_id = ticket.pending_review_id
     if await active_run(session, ticket.id) is not None:

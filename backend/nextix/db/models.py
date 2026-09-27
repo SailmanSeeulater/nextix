@@ -74,6 +74,7 @@ class Ticket(Base):
     checks_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     checks_error: Mapped[str | None] = mapped_column(Text)  # "forbidden" without Checks: read
     pending_review_id: Mapped[int | None] = mapped_column(BigInteger)
+    pending_comment: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

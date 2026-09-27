@@ -159,8 +159,10 @@ async def handle_issue_comment(
     if repo is None:
         return DispatchResult(note="repo disabled or unknown")
     issue = GhIssue.model_validate(payload["issue"])
-    if payload.get("action") != "created" or issue.pull_request is not None:
-        return DispatchResult(note="not a new issue comment")
+    if payload.get("action") != "created":
+        return DispatchResult(note="not a new comment")
+    if issue.pull_request is not None:
+        return await _pull_request_comment(payload, session, repo, issue)
     ticket = await service.get_ticket(session, repo, issue.number)
     if ticket is None:
         return DispatchResult(note="not a nextix issue")
@@ -172,6 +174,51 @@ async def handle_issue_comment(
         changed_tickets={ticket.id},
         note=f"@{author} answered the question: queueing a run",
         start_runs={ticket.id: StartRun()},
+    )
+
+
+MAX_COMMENT_CHARS = 4000
+
+
+async def _pull_request_comment(
+    payload: dict[str, Any], session: AsyncSession, repo: Repo, pr: GhIssue
+) -> DispatchResult:
+    """A trusted person's comment on a nextix PR's conversation is feedback, like a
+    review: the agent addresses it on the same branch (docs/phase5.md, decision 8)."""
+    comment = payload.get("comment") or {}
+    author = (comment.get("user") or {}).get("login")
+    body = (comment.get("body") or "").strip()
+    ticket = await session.scalar(
+        select(Ticket).where(Ticket.repo_id == repo.id, Ticket.pr_number == pr.number)
+    )
+    if ticket is None:
+        return DispatchResult(note="not a nextix pull request")
+    if not body or pr.state != "open" or ticket.issue_state != "open":
+        return DispatchResult(note="nothing to act on")
+    if not _trusted(author, repo):
+        return DispatchResult(note="comment by someone who can't start agents")
+    latest = await session.scalar(
+        select(Run).where(Run.ticket_id == ticket.id).order_by(Run.attempt.desc()).limit(1)
+    )
+    meta = {
+        "id": None,
+        "author": author,
+        "state": "commented",
+        "html_url": comment.get("html_url"),
+        "comments": 0,
+        "body": body[:MAX_COMMENT_CHARS],
+    }
+    return DispatchResult(
+        changed_tickets={ticket.id},
+        note=f"@{author} commented on the PR: queueing a feedback run",
+        start_runs={
+            ticket.id: StartRun(
+                task_title=latest.task_title if latest else None,
+                task_body=latest.task_body if latest else None,
+                trigger="review_feedback",
+                review_meta=meta,
+            )
+        },
     )
 
 

@@ -39,6 +39,7 @@ docker compose up --build
 | runner    | Celery worker for agent runs, one at a time; the only service with the Docker socket |
 | beat      | Celery beat (reaper every 30 s)              |
 | agent     | Build-only: the sandbox image `nextix-agent:latest` (`docker compose build agent`) |
+| smee      | Relays GitHub webhooks from `SMEE_URL` (the App's smee.io channel) to the API |
 | postgres  | user/pass/db `nextix`; not published on the host (see below) |
 | redis     | not published on the host                    |
 
@@ -275,6 +276,8 @@ test result and a per-route change table. Test reports and screenshots are store
   comment (file and line), commits on top, and the worker updates the same PR. A review
   that arrives while a run is active waits and starts when it ends. Approvals and other
   people's reviews never start runs.
+- **PR comments are feedback too.** A trusted person's comment in a nextix PR's
+  conversation starts a `review_feedback` run with that comment as the instruction.
 - **Answering a question is a comment.** When a ticket waits in Needs Input, the owner's
   reply on the issue starts the next run (the question and the reply are passed to the
   agent) and removes `nextix:needs-input`.
