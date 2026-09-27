@@ -45,6 +45,9 @@ _META: dict[str, dict[str, tuple[type, ...]]] = {
         for kind in SCREENSHOT_KINDS
     },
 }
+# What the before screenshots were taken from ("main", "nextix/issue-7 before this change").
+_META["screenshot_before"]["baseline"] = (str,)
+MAX_META_TEXT = 200
 CONTENT_TYPES = {".png": "image/png", ".txt": "text/plain; charset=utf-8"}
 
 
@@ -64,7 +67,7 @@ def _clean_meta(kind: str, meta: Any) -> dict[str, Any]:
         if isinstance(value, bool) and bool not in types:
             continue
         if isinstance(value, types):
-            kept[key] = value
+            kept[key] = redact(value)[:MAX_META_TEXT] if isinstance(value, str) else value
     return kept
 
 

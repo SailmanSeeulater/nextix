@@ -345,6 +345,71 @@ class GitHubClient:
             )
         ]
 
+    # ------------------------------------------------------------------ git data
+
+    async def branch_head(
+        self, installation_id: int, owner: str, name: str, branch: str
+    ) -> str | None:
+        """The commit a branch points at, or None if there is no such branch."""
+        try:
+            data = await self._get(
+                installation_id, f"/repos/{owner}/{name}/git/ref/heads/{quote(branch, safe='/')}"
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        return str(data["object"]["sha"])
+
+    async def commit_files(
+        self,
+        installation_id: int,
+        owner: str,
+        name: str,
+        *,
+        branch: str,
+        files: dict[str, bytes],
+        message: str,
+    ) -> str:
+        """Add ``files`` (path -> bytes) to ``branch`` in one commit, creating the branch as
+        an orphan if it doesn't exist. Never forced: the new commit sits on the current head.
+        Returns the new commit's sha."""
+        head = await self.branch_head(installation_id, owner, name, branch)
+        base_tree = None
+        if head is not None:
+            commit = await self._get(installation_id, f"/repos/{owner}/{name}/git/commits/{head}")
+            base_tree = commit["tree"]["sha"]
+        entries = []
+        for path, content in files.items():
+            blob = await self._post(
+                installation_id,
+                f"/repos/{owner}/{name}/git/blobs",
+                {"content": base64.b64encode(content).decode(), "encoding": "base64"},
+            )
+            entries.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+        tree_body: dict[str, Any] = {"tree": entries}
+        if base_tree:
+            tree_body["base_tree"] = base_tree
+        tree = await self._post(installation_id, f"/repos/{owner}/{name}/git/trees", tree_body)
+        new = await self._post(
+            installation_id,
+            f"/repos/{owner}/{name}/git/commits",
+            {"message": message, "tree": tree["sha"], "parents": [head] if head else []},
+        )
+        if head is None:
+            await self._post(
+                installation_id,
+                f"/repos/{owner}/{name}/git/refs",
+                {"ref": f"refs/heads/{branch}", "sha": new["sha"]},
+            )
+        else:
+            await self._patch(
+                installation_id,
+                f"/repos/{owner}/{name}/git/refs/heads/{quote(branch, safe='/')}",
+                {"sha": new["sha"], "force": False},
+            )
+        return str(new["sha"])
+
     # ------------------------------------------------------------------ runs
 
     async def branch_exists(self, installation_id: int, owner: str, name: str, branch: str) -> bool:

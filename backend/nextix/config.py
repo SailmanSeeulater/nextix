@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # Agent model by ticket label, first match wins, e.g.
     # "nextix:small=claude-haiku-4-5,nextix:large=claude-opus-5-5". Else anthropic_model.
     nextix_model_routes: str = ""
+    # Post before/after screenshots of changed pages on the PR (images are stored on the
+    # nextix/screenshots branch so GitHub can show them).
+    nextix_pr_screenshots: bool = True
     artifact_dir: Path = Path("/data/artifacts")
 
     # CORS origins for the web app. Comma-separated.

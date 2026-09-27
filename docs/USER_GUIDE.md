@@ -310,6 +310,11 @@ What each part does:
 - **`test`**: run after the agent finishes. The result appears on the ticket page, in
   the pull request, and in the closing comment. Failing tests never stop the PR; they're
   just shown clearly, and the board pass gets a "tests failing" marker.
+- **Screenshots on the PR**: when a run changes how a page looks, the PR gets a comment
+  with the before and after images side by side, so you can review it on GitHub, even
+  on your phone. The first run compares with `main`; a follow-up run (after your comment
+  or review) compares with the PR as it was, so you see just what that round changed.
+  The images live on a `nextix/screenshots` branch in your repo; never merge it.
 - **`app`**: how to start your app. nexTix screenshots each `path` on `main` before the
   agent starts and again after it finishes, and highlights every pixel that changed.
   `ready_timeout_s` (default 90) is how long to wait for the app to answer.

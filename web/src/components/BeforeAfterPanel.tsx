@@ -32,8 +32,9 @@ const MODES: ReadonlyArray<{ id: Mode; title: string }> = [
 ];
 
 /**
- * Before / After: one section per captured route. Before is the default branch, after is
- * the agent's branch; the diff image marks every pixel that changed. One control picks
+ * Before / After: one section per captured route. Before is the default branch on a
+ * ticket's first run, and the PR as it stood on later runs (the runner records which as
+ * `baseline`); after is the agent's branch. The diff image marks every pixel that changed. One control picks
  * how every route is compared, as GitHub's image diff does.
  */
 export const BeforeAfterPanel = memo(function BeforeAfterPanel({
@@ -51,6 +52,10 @@ export const BeforeAfterPanel = memo(function BeforeAfterPanel({
   const general = useMemo(() => generalScreenshotErrors(run), [run]);
   const [mode, setMode] = useState<Mode>("side");
   const changed = groups.filter((g) => g.diff && hasVisibleChange(g.diff));
+  const baseline = useMemo(() => {
+    const value = artifacts?.find((a) => a.kind === "screenshot_before")?.meta?.baseline;
+    return typeof value === "string" && value ? value : null;
+  }, [artifacts]);
 
   return (
     <div className="shots">
@@ -66,6 +71,9 @@ export const BeforeAfterPanel = memo(function BeforeAfterPanel({
                   ? "no visible change"
                   : `${changed.length} changed`}
               </span>
+            ) : null}
+            {baseline ? (
+              <span className="panel-bar-meta">compared with {baseline}</span>
             ) : null}
           </p>
           <div className="panel-bar-tools">

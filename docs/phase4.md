@@ -19,7 +19,7 @@ images, and a backend-only repo gracefully shows the diff and tests only.
    the worker copies the directory out (Docker `get_archive`), checks every file (type by
    magic bytes, size caps, no path tricks), stores it under `ARTIFACT_DIR/<run_id>/`, and
    records `artifacts` rows. No upload endpoint is exposed to the sandbox.
-3. **Before = the default branch, every time.** The runner checks out the default branch
+3. **Before = the default branch on a ticket's first run.** (Revised 2026-09-27: a follow-up run's before is the PR branch as it stood, so each round shows what it changed; see `baseline` in the screenshot meta.) The runner checks out the default branch
    in a separate git worktree, runs setup there, starts the app, and captures the
    "before" screenshots before the agent starts. Reruns compare against the default
    branch too, not the previous attempt.
@@ -165,3 +165,12 @@ has screenshots) · **Checks**.
   status and links; "CI isn't connected" note when `connected` is false; "No CI checks
   reported" when empty.
 - Board cards: a small "tests failing" marker when the latest run's tests failed.
+
+## Screenshots on the PR (added 2026-09-27)
+
+When a run changes what any route looks like, the worker commits that route's before,
+after, and diff PNGs to the repo's `nextix/screenshots` branch (an orphan branch that only
+holds images; never merged) under `issue-<n>/attempt-<k>/`, and comments on the PR with
+before and after side by side (`blob/nextix/screenshots/...?raw=true` URLs, which render
+for anyone who can see the repo). Routes without a visible change are listed by name; a
+run with no visible change posts nothing. `NEXTIX_PR_SCREENSHOTS=false` turns it off.

@@ -31,6 +31,7 @@ from nextix.db.models import Artifact, Repo, Run, Ticket
 from nextix.events.stream import EventPublisher, publish_ticket_changes
 from nextix.github.client import GitHubClient
 from nextix.redact import redact
+from nextix.review.pr_screenshots import publish_screenshots
 from nextix.runs.artifacts import MAX_TOTAL_BYTES as MAX_ARTIFACT_BYTES
 from nextix.runs.artifacts import SANDBOX_DIR as ARTIFACTS_SANDBOX_DIR
 from nextix.runs.artifacts import collect as collect_artifacts
@@ -883,6 +884,8 @@ async def _conclude(
     ticket.pr_head_sha = pr["head_sha"] or ticket.pr_head_sha
     ticket.updated_at = datetime.now(UTC)
     await session.commit()
+    if ctx.settings.nextix_pr_screenshots:
+        await publish_screenshots(ctx.gh, repo, ticket, run, shots, ctx.settings.artifact_dir)
     verb = "Opened" if created else "Updated"
     reviewer = (run.review_meta or {}).get("author") if run.trigger == "review_feedback" else None
     await _finish(
