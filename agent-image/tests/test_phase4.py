@@ -813,7 +813,11 @@ async def test_before_and_after_screenshots_diffs_and_tests(tmp_path: Path, orig
         ("screenshot_diff", "/settings", "shots/settings-diff.png"),
     ]
     metas = {(a["kind"], a["label"]): a["meta"] for a in manifest["artifacts"]}
-    assert metas[("screenshot_before", "/settings")] == {"width": 320, "height": 240}
+    assert metas[("screenshot_before", "/settings")] == {
+        "width": 320,
+        "height": 240,
+        "baseline": "main",
+    }
     assert metas[("screenshot_diff", "/")] == {
         "width": 320,
         "height": 240,
@@ -1530,3 +1534,25 @@ def test_a_subtle_background_change_counts() -> None:
     after = before.copy()
     after.paste((239, 246, 255, 255), (10, 10, 30, 30))
     assert runner.pixel_diff(encode(before), encode(after)).diff_pixels == 400
+
+
+async def test_a_follow_up_run_compares_with_the_pr_not_main(tmp_path: Path, origin: Path) -> None:
+    # The PR branch already exists on the remote: this is a review-feedback run.
+    branch = make_env()["NEXTIX_BRANCH"]
+    seed = tmp_path / "seed"
+    git("checkout", "--quiet", "-b", branch, cwd=seed)
+    (seed / "pr.txt").write_text("the first round\n", encoding="utf-8")
+    seed_commit(seed, "round one")
+    git("push", "--quiet", "origin", branch, cwd=seed)
+
+    project = project_env(setup=["npm ci"], test="npm test", app=APP)
+    query = ScriptedQuery(result_message(), edit=edit_settings)
+    instance, poster, *_ = build(tmp_path, origin, query, project=project)
+    assert await instance.run() == EXIT_OK
+
+    metas = [
+        a["meta"] for a in read_manifest(tmp_path)["artifacts"] if a["kind"] == "screenshot_before"
+    ]
+    assert metas and all(m["baseline"] == f"{branch} before this change" for m in metas)
+    logs = [e["payload"]["text"] for e in poster.events if e["kind"] == "log"]
+    assert f"Taking the before screenshots from {branch} before this change..." in logs

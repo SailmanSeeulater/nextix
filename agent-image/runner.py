@@ -2582,6 +2582,9 @@ class Runner:
         self.out_dir = work_dir / OUT_DIRNAME
         self.artifacts = Artifacts()
         self._before: dict[int, bytes] = {}  # route index -> before screenshot
+        # What the before screenshots show: None = the default branch (a first run).
+        self._before_ref: str | None = None
+        self._before_label: str | None = None
         app = cfg.project.app
         self._stems = route_stems(app.screenshots) if app is not None else []
         self._budget = plan_budget(0.0, cfg.timeout_min, cfg.project)
@@ -2784,6 +2787,10 @@ class Runner:
         )
         if checkout.existing:
             self._log(f"Checked out the existing branch {cfg.branch}.")
+            # A follow-up run (review feedback, retry): "before" is the PR as it stood, so
+            # the screenshots show what this round changed.
+            self._before_ref = f"refs/remotes/origin/{cfg.branch}"
+            self._before_label = f"{cfg.branch} before this change"
         else:
             self._log(f"Created {cfg.branch} from {cfg.default_branch}.")
         self._start_sha = (
@@ -2996,10 +3003,15 @@ class Runner:
     # -- screenshots
 
     async def _capture_before(self, app: AppConfig) -> None:
-        """The default branch, in a worktree the agent never sees: setup, app, capture."""
-        cfg = self.cfg
+        """The baseline, in a worktree the agent never sees: setup, app, capture.
+
+        The baseline is the default branch on a ticket's first run, and the PR branch as it
+        stood on later runs (see ``_prepare``).
+        """
         base = self.base_dir
-        self._log(f"Taking the before screenshots from {cfg.default_branch}...")
+        ref = self._before_ref or f"refs/remotes/origin/{self.cfg.default_branch}"
+        label = self._before_label or self.cfg.default_branch
+        self._log(f"Taking the before screenshots from {label}...")
         try:
             await git_ok(
                 self._git,
@@ -3008,20 +3020,20 @@ class Runner:
                     "add",
                     "--detach",
                     str(base),
-                    f"refs/remotes/origin/{cfg.default_branch}",
+                    ref,
                 ],
                 cwd=self.repo_dir,
             )
         except GitError as exc:
-            self._step_error("app_before", None, f"could not check out {cfg.default_branch}")
-            self._log(f"No before screenshots: could not check out {cfg.default_branch} ({exc}).")
+            self._step_error("app_before", None, f"could not check out {label}")
+            self._log(f"No before screenshots: could not check out {label} ({exc}).")
             return
         try:
             await self._run_setup(
                 base,
                 step="setup_before",
                 deadline=self._budget.before,
-                where=f" on {cfg.default_branch}",
+                where=f" on {label}",
             )
             shots = await self._app_screenshots(
                 app, cwd=base, phase="before", deadline=self._budget.before
@@ -3167,7 +3179,12 @@ class Runner:
                 kind=kind,
                 label=route.path,
                 file=f"{SHOTS_DIRNAME}/{self._stems[index]}-{phase}.png",
-                meta={"width": width, "height": height},
+                meta={"width": width, "height": height}
+                | (
+                    {"baseline": self._before_label or self.cfg.default_branch}
+                    if kind == "screenshot_before"
+                    else {}
+                ),
                 data=png,
                 rank=(1, index, _SHOT_KIND_ORDER[kind]),
             )
