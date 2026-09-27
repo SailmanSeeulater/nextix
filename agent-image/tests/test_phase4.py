@@ -1556,3 +1556,31 @@ async def test_a_follow_up_run_compares_with_the_pr_not_main(tmp_path: Path, ori
     assert metas and all(m["baseline"] == f"{branch} before this change" for m in metas)
     logs = [e["payload"]["text"] for e in poster.events if e["kind"] == "log"]
     assert f"Taking the before screenshots from {branch} before this change..." in logs
+
+
+@posix_only
+async def test_a_stray_sigterm_is_logged_and_ignored() -> None:
+    import signal as signal_module
+
+    class Dummy:
+        def __init__(self) -> None:
+            self.ignored: list[str] = []
+
+        def ignore_signal(self, name: str) -> None:
+            self.ignored.append(name)
+
+    dummy = Dummy()
+    runner._install_signal_handlers(dummy)  # type: ignore[arg-type]
+    try:
+        os.kill(os.getpid(), signal_module.SIGTERM)
+        await asyncio.sleep(0.05)
+        assert dummy.ignored == ["SIGTERM"]
+    finally:
+        loop = asyncio.get_running_loop()
+        for sig in runner.STOP_SIGNALS:
+            loop.remove_signal_handler(sig)
+
+
+def test_the_agent_is_told_not_to_kill_by_pattern(tmp_path: Path) -> None:
+    prompt = runner.build_system_prompt(make_config(), tmp_path)
+    assert "Never kill processes by name or pattern" in prompt

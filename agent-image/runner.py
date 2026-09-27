@@ -825,6 +825,10 @@ def build_system_prompt(cfg: Config, repo_dir: Path, setup: SetupReport | None =
         f"Leave your changes uncommitted in the working tree. nexTix commits them to "
         f"{cfg.branch} and opens the pull request. Never push, and do not change git "
         "remotes, branches, or git config. (This sandbox has no push access anyway.)",
+        "Only stop processes you started yourself, by the PID you got when starting them "
+        "(e.g. `$!`). Never kill processes by name or pattern (pkill, killall, or loops over "
+        "/proc): the sandbox's own processes run alongside yours. You don't need to clean "
+        "up servers you started; nexTix stops everything left running when you finish.",
         f"If you cannot proceed without information only a person can give you, write your "
         f"question to {NEEDS_INPUT_FILE} (say what you need and why), then stop without "
         "making any other changes.",
@@ -2622,6 +2626,10 @@ class Runner:
 
     # -- small helpers
 
+    def ignore_signal(self, name: str) -> None:
+        """A stray stop signal (almost always the agent's own `kill`): note it, carry on."""
+        self._log(f"Ignored {name}: something in the sandbox tried to stop the runner.")
+
     def request_stop(self, reason: str) -> None:
         """Stop the run as soon as possible (410 from the API, or SIGTERM)."""
         if self.stop_reason is None:
@@ -3365,11 +3373,25 @@ def _finished_line(result: RunResult) -> str:
 # --------------------------------------------------------------------------- entrypoint
 
 
+STOP_SIGNALS = (
+    (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+    if hasattr(signal, "SIGHUP")
+    else (
+        signal.SIGTERM,
+        signal.SIGINT,
+    )
+)
+
+
 def _install_signal_handlers(runner: Runner) -> None:
+    """Stop signals are ignored (and logged). nexTix never sends one: the worker stops a
+    sandbox with SIGKILL, and a cancel arrives as a 410 from the API. The agent runs as the
+    same user, so a `kill` it aims at its own dev server (e.g. by matching "next" in
+    /proc/*/cmdline) can hit this process; that must not end the run."""
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
+    for sig in STOP_SIGNALS:
         with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
-            loop.add_signal_handler(sig, runner.request_stop, "terminated")
+            loop.add_signal_handler(sig, runner.ignore_signal, sig.name)
 
 
 async def amain(
