@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import func, select, text, update
@@ -157,6 +158,39 @@ def claude_credential_env(settings: Settings) -> dict[str, str]:
     return {}
 
 
+def proxy_env(settings: Settings) -> dict[str, str]:
+    """Route the sandbox's traffic through the egress allowlist proxy, if there is one.
+
+    Both spellings of each variable, since tools disagree on which they read (curl and git
+    only take lowercase ``http_proxy``). The API (callbacks) and loopback (the repo's app,
+    for tests and screenshots) are reached directly. Gradle and other JVM tools ignore these
+    variables, so they get the same through ``JAVA_TOOL_OPTIONS``.
+    """
+    proxy = urlsplit(settings.agent_proxy_url.strip())
+    if not proxy.hostname:
+        return {}
+    url = f"{proxy.scheme or 'http'}://{proxy.hostname}:{proxy.port or 3128}"
+    api_host = urlsplit(settings.agent_callback_base).hostname or "api"
+    direct = ["localhost", "127.0.0.1", "::1", api_host]
+    java_props = [
+        f"-D{scheme}.{prop}"
+        for scheme in ("http", "https")
+        for prop in (f"proxyHost={proxy.hostname}", f"proxyPort={proxy.port or 3128}")
+    ]
+    java_props.append(f"-Dhttp.nonProxyHosts={'|'.join(h for h in direct if h != '::1')}")
+    return {
+        "HTTP_PROXY": url,
+        "HTTPS_PROXY": url,
+        "http_proxy": url,
+        "https_proxy": url,
+        "NO_PROXY": ",".join(direct),
+        "no_proxy": ",".join(direct),
+        "JAVA_TOOL_OPTIONS": " ".join(java_props),
+        # Telemetry and update checks would only be refused by the allowlist.
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    }
+
+
 def sandbox_env(
     *,
     settings: Settings,
@@ -209,6 +243,7 @@ def sandbox_env(
         "NEXTIX_CONFIG_JSON": json.dumps(config.sandbox_json(), ensure_ascii=False),
         "GITHUB_TOKEN": clone_token,
         **claude_credential_env(settings),
+        **proxy_env(settings),
     }
 
 

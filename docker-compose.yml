@@ -5,6 +5,8 @@ x-backend-env: &backend-env
   environment:
     DATABASE_URL: postgresql+psycopg://nextix:nextix@postgres:5432/nextix
     REDIS_URL: redis://redis:6379/0
+    # Sandboxes reach the internet only through this proxy (see `egress` below).
+    AGENT_PROXY_URL: http://egress:3128
 
 services:
   postgres:
@@ -41,7 +43,7 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     # `agents` is the sandboxes' network: they can reach the API (for callbacks) and the
-    # internet, but not Postgres or Redis, which are only on `default`.
+    # egress proxy, but not Postgres or Redis, which are only on `default`.
     networks: [default, agents]
     volumes:
       - ./backend:/app
@@ -89,6 +91,15 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # The sandboxes' only way out: an allowlist proxy (egress/squid.conf). It sits on both
+  # networks; the sandboxes are only on `agents`, which has no route to the internet.
+  egress:
+    image: ubuntu/squid:latest
+    volumes:
+      - ./egress/squid.conf:/etc/squid/squid.conf:ro
+    networks: [default, agents]
+    restart: unless-stopped
 
   # The agent sandbox image. Not a long-running service: build it with
   #   docker compose build agent
@@ -145,6 +156,7 @@ services:
 networks:
   agents:
     name: nextix_agents
+    internal: true  # no direct route out: sandboxes go through `egress`
 
 volumes:
   pgdata:

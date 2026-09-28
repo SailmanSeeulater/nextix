@@ -36,6 +36,8 @@ runner, the worker, the API and the web app agree.
    `host.docker.internal` / `gateway.docker.internal` point at 127.0.0.1. Residual risk:
    a sandbox can still reach the API and web ports (both need the API token) and any
    other project's published ports on the host. An egress allowlist (proxy) is Phase 6.
+   *(Since done: `nextix_agents` is `internal`, and the sandboxes go out through the
+   `egress` Squid proxy, `egress/squid.conf`.)*
 10. **Only the `runner` service has the Docker socket.** It is a Celery worker for the
     `runs` queue (concurrency 1) and runs as root because the socket is root-owned. The
     reaper runs on the ordinary `worker` (no socket): it fails silent runs, and the runner

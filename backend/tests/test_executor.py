@@ -23,7 +23,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from nextix.config import Settings, get_settings
 from nextix.db.models import Artifact, Repo, Run, Ticket
 from nextix.github.client import GitHubClient
-from nextix.runs.executor import WorkerContext, execute_run, sandbox_env, sweep_orphans
+from nextix.runs.executor import (
+    WorkerContext,
+    execute_run,
+    proxy_env,
+    sandbox_env,
+    sweep_orphans,
+)
 from nextix.runs.push import GitBundlePusher, PushError
 from nextix.runs.reaper import reap
 from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, SandboxSpec
@@ -305,6 +311,21 @@ async def test_api_key_mode_passes_only_the_api_key(
     )
     assert env["ANTHROPIC_API_KEY"] == "sk-ant-api03-k"
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+
+
+def test_proxy_env_routes_everything_but_the_api_and_loopback_through_egress() -> None:
+    env = proxy_env(settings(agent_proxy_url="http://egress:3128"))
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        assert env[name] == "http://egress:3128"
+    assert env["NO_PROXY"] == env["no_proxy"] == "localhost,127.0.0.1,::1,api"
+    assert "-Dhttps.proxyHost=egress" in env["JAVA_TOOL_OPTIONS"]
+    assert "-Dhttps.proxyPort=3128" in env["JAVA_TOOL_OPTIONS"]
+    assert "-Dhttp.nonProxyHosts=localhost|127.0.0.1|api" in env["JAVA_TOOL_OPTIONS"]
+    assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+
+
+def test_no_proxy_configured_passes_no_proxy_variables() -> None:
+    assert proxy_env(settings(agent_proxy_url="")) == {}
 
 
 # ------------------------------------------------------------------ other outcomes
