@@ -1244,6 +1244,34 @@ a.button {
   margin-top: 14px;
 }
 
+/* A collection (nexTix, Portfolio): its name stays pinned while its swatches scroll under it. */
+.theme-collection + .theme-collection {
+  margin-top: 18px;
+}
+
+.theme-collection-head {
+  position: sticky;
+  top: -16px;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 -16px;
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--pane);
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.theme-collection-count {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
 .theme-group-label {
   margin: 12px 0 8px;
   font-size: 12px;

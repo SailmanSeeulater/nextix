@@ -153,7 +153,7 @@ components:
 
 Every ticket is an Apple Wallet pass and every state is a stack of passes. The board refuses the category default of flat grey kanban cards in bordered lanes: six stacks stand side by side, collapsed passes overlap so only their header strips show, and the newest pass in each stack lies open with PassKit anatomy (a header strip carrying repo and issue number, one large primary field, small-caps label-over-value fields, and a boarding-pass tear line). Filing work is one sentence typed into a blank pass at the top.
 
-Color is flat and fully committed, and it belongs to the theme rather than the component. The palette is KeyUp's: the same 15 themes (11 dark, 4 light) with the same values, each setting 16 base tokens from which every nexTix color derives, including the six pass fills. The owner picks a theme in the top bar; until then the OS preference chooses Charcoal & Mustard or Linen & Mustard. The values in this file's frontmatter are Charcoal & Mustard, the default and `:root` fallback; the normative source is the theme table in `web/src/lib/themes.ts` plus the derivation formulas in `web/src/app/globals.css`.
+Color is flat and fully committed, and it belongs to the theme rather than the component. There are 36 themes in two collections: **nexTix**, KeyUp's 15 (11 dark, 4 light) with the same values, and **Portfolio**, the 21 themes of the owner's portfolio site (8 dark, 13 light), whose ground, surface, text and brand map straight onto bg, raised, ink and accent. Each theme sets 16 base tokens from which every nexTix color derives, including the six pass fills. The owner picks a theme in the top bar; until then the OS preference chooses Charcoal & Mustard or Linen & Mustard. The values in this file's frontmatter are Charcoal & Mustard, the default and `:root` fallback; the normative source is the theme table in `web/src/lib/themes.ts` plus the derivation formulas in `web/src/app/globals.css`.
 
 The board is read at a glance between other tasks, so density is high but calm: one type family, weights doing the hierarchy, exact tabular numerals for time and money, and state always carried three ways (fill, glyph, word).
 
@@ -287,7 +287,7 @@ Confident pills; one primary per view.
 
 ### Navigation
 - **Top bar:** wordmark left; 13px ink-2 tools right. The connection signal is a green pulsing dot and "Live", a spinning refresh glyph and "Reconnecting" in ink-3, or red when offline.
-- **Theme picker:** a raised 10px button with a palette glyph and the theme's first word; it opens a 16px-radius pane popover with Dark and Light groups of swatches, each drawn in its own theme as a tiny three-pass stack (raised, ink, accent). The selected swatch gets a 2px accent outline and a check.
+- **Theme picker:** a raised 10px button with a palette glyph and the theme's first word; it opens a 16px-radius pane popover grouped by collection (nexTix, then Portfolio, each name pinned while its swatches scroll under it) and within each by Dark and Light. Every swatch is drawn in its own theme as a tiny three-pass stack (raised, ink, accent). The selected swatch gets a 2px accent outline and a check, and opens scrolled into view.
 
 ### Live Dot (signature)
 An 8px dot in currentColor with a ring that expands from 0.5 to 1.4 scale and fades over 1.8s. Accent on a running Doing pass; green in the top bar. Reduced motion stops the pulse and every other animation.
@@ -297,14 +297,14 @@ An 8px dot in currentColor with a ring that expands from 0.5 to 1.4 scale and fa
 ### Do:
 - **Do** derive every new color from the 16 theme tokens with `color-mix` in globals.css, and add the check to themes.test.ts.
 - **Do** give every state a fill, a glyph and a word.
-- **Do** keep Doing and Needs Input far from Failed red (ΔE 0.2 or more) in all 15 themes.
+- **Do** keep Doing and Needs Input far from Failed red (ΔE 0.2 or more) in all 36 themes.
 - **Do** set times, costs and counts in tabular numerals.
 - **Do** use the notched tear line between a pass's header and its body.
 - **Do** render disabled primaries neutral: field fill, ink-3 text, hairline ring.
 - **Do** keep pass labels at a 94% ink mix so they pass 4.5:1 on every fill.
 
 ### Don't:
-- **Don't** hardcode colors in component CSS or give nexTix its own palette apart from KeyUp's themes.
+- **Don't** hardcode colors in component CSS or give nexTix a palette outside its two theme collections.
 - **Don't** fill a Doing pass with the full accent; it reads as Failed where the accent sits near red.
 - **Don't** use the accent for links, hover washes, state hues or decoration; links stay neutral ink.
 - **Don't** put gradients on fills; color is flat at full commitment.
