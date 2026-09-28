@@ -170,12 +170,19 @@ async def test_errors_never_echo_the_token() -> None:
     with pytest.raises(TriageError) as info:
         await run(triager(fake))
     assert TOKEN not in str(info.value)
-    assert "sk-ant-…" in str(info.value)
+    assert "[redacted]" in str(info.value)
 
 
 def test_redact_hides_every_anthropic_credential_shape() -> None:
     text = "a sk-ant-oat01-abc_DEF-123 b sk-ant-api03-xyz c"
-    assert redact(text) == "a sk-ant-… b sk-ant-… c"
+    assert redact(text) == "a [redacted] b [redacted] c"
+
+
+def test_triage_redact_also_hides_github_tokens() -> None:
+    # Triage uses the shared scrubber, so a GitHub token in an error is hidden too.
+    assert redact("clone https://x-access-token:ghs_abc@github.com/o/r") == (
+        "clone https://[redacted]@github.com/o/r"
+    )
 
 
 # ------------------------------------------------------------------ review fixes

@@ -14,7 +14,7 @@ from nextix.db.models import Run, Ticket
 from nextix.db.session import get_db
 from nextix.events.stream import EventPublisher, publish_ticket_changes
 from nextix.github.client import GitHubClient
-from nextix.github.webhooks import dispatch, record_delivery, verify_signature
+from nextix.github.webhooks import StartRun, dispatch, record_delivery, verify_signature
 from nextix.runs.lifecycle import ActiveRunExists, RunEnqueuer, enqueue_run
 
 log = logging.getLogger(__name__)
@@ -79,18 +79,43 @@ async def github_webhook(
                 review_meta=start.review_meta,
             )
         except ActiveRunExists:
-            if start.review_id is not None:
-                # Busy: the review is picked up as soon as the active run finishes.
-                ticket.pending_review_id = start.review_id
-                await session.commit()
-                log.info("ticket %s is busy; review %s is pending", ticket_id, start.review_id)
-            elif start.trigger == "review_feedback" and start.review_meta:
-                # A PR comment while busy: the newest one waits for the active run to end.
-                ticket.pending_comment = start.review_meta
-                await session.commit()
-                log.info("ticket %s is busy; a PR comment is pending", ticket_id)
+            # Busy: a review or PR comment is picked up as soon as the active run finishes.
+            if await _park_feedback(session, ticket, start):
+                log.info("ticket %s is busy; its feedback is pending", ticket_id)
             else:
                 log.info("ticket %s already has an active run", ticket_id)
         except Exception:
+            # The delivery is already recorded, so GitHub's redelivery would be skipped as a
+            # duplicate: whatever isn't kept here is lost for good.
             log.exception("could not queue a run for ticket %s", ticket_id)
+            try:
+                await session.rollback()
+                ticket = await session.get(Ticket, ticket_id, populate_existing=True)
+                parked = ticket is not None and await _park_feedback(session, ticket, start)
+            except Exception:
+                log.exception("could not keep ticket %s's feedback for later", ticket_id)
+                continue
+            if parked:
+                # The reaper (start_pending_reviews) retries it once the queue is back.
+                log.warning("ticket %s: the feedback is pending; the reaper retries it", ticket_id)
+            else:
+                # Label / answer triggers: enqueue_run cancelled the run (enqueue_failed) and
+                # told the owner on the issue, so they can Retry from the board.
+                log.error("ticket %s: the run was not queued; the owner has to Retry it", ticket_id)
     return {"status": "ok", "note": result.note, "tickets": len(result.changed_tickets)}
+
+
+async def _park_feedback(session: AsyncSession, ticket: Ticket, start: StartRun) -> bool:
+    """Keep a review / PR-comment trigger on the ticket for start_pending_reviews.
+
+    Returns False for other triggers, which have nothing to park.
+    """
+    if start.review_id is not None:
+        ticket.pending_review_id = start.review_id
+    elif start.trigger == "review_feedback" and start.review_meta:
+        # Only the newest PR comment waits; it replaces an older pending one.
+        ticket.pending_comment = start.review_meta
+    else:
+        return False
+    await session.commit()
+    return True

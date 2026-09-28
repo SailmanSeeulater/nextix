@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -99,6 +99,12 @@ def _comment_for(run: Run, status: str, exit_reason: str | None) -> str | None:
         "secret_in_changes": (
             "the agent's changes contained one of the run's credentials, so nothing was pushed"
         ),
+        "bundle_too_large": "the agent's branch was too large to publish, so nothing was pushed",
+        "publish_failed": "something went wrong while publishing the run's work",
+        "pr_failed": (
+            "the branch was pushed, but opening the pull request failed; Retry will open it"
+        ),
+        "github_error": "GitHub could not be reached or refused a request; Retry once it answers",
     }
     reason = reasons.get(exit_reason or "", exit_reason or "unknown reason")
     if status == RunStatus.QUEUED:
@@ -325,6 +331,7 @@ async def _start_pending_comment(
 ) -> Run | None:
     if await active_run(session, ticket.id) is not None:
         return None
+    ticket_id = ticket.id
     meta = ticket.pending_comment
     ticket.pending_comment = None
     await session.commit()
@@ -349,6 +356,11 @@ async def _start_pending_comment(
         ticket.pending_comment = meta
         await session.commit()
         return None
+    except Exception:
+        # Redis down, say: enqueue_run cancelled the run it made (enqueue_failed). Keep
+        # the comment pending so the reaper's next beat tries again, instead of losing it.
+        await _restore_pending(session, ticket_id, comment=meta)
+        raise
 
 
 async def start_pending_review(
@@ -390,6 +402,7 @@ async def start_pending_review(
         # Kept pending: the reaper tries again on its next beat.
         log.exception("could not read pending review %s", review_id)
         return None
+    ticket_id = ticket.id
     ticket.pending_review_id = None
     await session.commit()
     latest = await session.scalar(
@@ -419,3 +432,41 @@ async def start_pending_review(
         ticket.pending_review_id = review_id  # still busy; try again after that run
         await session.commit()
         return None
+    except Exception:
+        # As for a pending comment: the reaper's next beat tries again.
+        await _restore_pending(session, ticket_id, review_id=review_id)
+        raise
+
+
+async def _restore_pending(
+    session: AsyncSession,
+    ticket_id: uuid.UUID,
+    *,
+    review_id: int | None = None,
+    comment: dict[str, Any] | None = None,
+) -> None:
+    """Put back a pending review or comment whose run could not be queued.
+
+    Only if nothing is waiting in its place: feedback that arrived meanwhile wins. Never
+    raises, so the caller re-raises the original error.
+    """
+    try:
+        await session.rollback()  # the failure may have left the transaction unusable
+        if review_id is not None:
+            restore = (
+                update(Ticket)
+                .where(Ticket.id == ticket_id, Ticket.pending_review_id.is_(None))
+                .values(pending_review_id=review_id)
+            )
+        else:
+            # A cleared JSONB column may hold JSON null rather than SQL NULL.
+            empty = Ticket.pending_comment.is_(None) | (
+                func.jsonb_typeof(Ticket.pending_comment) == "null"
+            )
+            restore = (
+                update(Ticket).where(Ticket.id == ticket_id, empty).values(pending_comment=comment)
+            )
+        await session.execute(restore)
+        await session.commit()
+    except Exception:
+        log.exception("could not keep the feedback of ticket %s pending", ticket_id)

@@ -81,3 +81,18 @@ export function pendingSettled(
 ): boolean {
   return boardCaughtUp(pending, card) || now - pending.since > PENDING_TIMEOUT_MS;
 }
+
+/**
+ * `pending` without the entry for `id`, when that entry is still `started` (a newer action
+ * on the same pass keeps its own). Returns the same object when there is nothing to drop.
+ */
+export function dropPending(
+  pending: Record<string, PendingAction>,
+  id: string,
+  started: PendingAction,
+): Record<string, PendingAction> {
+  if (pending[id] !== started) return pending;
+  const next = { ...pending };
+  delete next[id];
+  return next;
+}

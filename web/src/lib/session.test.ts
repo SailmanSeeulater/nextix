@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isValidSession, safeEqual, sessionValue } from "./session";
+import { configuredToken, isValidSession, safeEqual, sessionValue } from "./session";
 
 describe("session", () => {
   afterEach(() => {
@@ -24,6 +24,16 @@ describe("session", () => {
   it("fails closed when no token is configured", async () => {
     expect(await isValidSession(await sessionValue("anything"))).toBe(false);
     expect(await isValidSession("")).toBe(false);
+  });
+
+  it("treats an empty or example token as unset", async () => {
+    for (const token of ["", "change-me"]) {
+      process.env.NEXTIX_API_TOKEN = token;
+      expect(configuredToken()).toBeNull();
+      expect(await isValidSession(await sessionValue("change-me"))).toBe(false);
+    }
+    process.env.NEXTIX_API_TOKEN = "tok";
+    expect(configuredToken()).toBe("tok");
   });
 
   it("compares strings safely", () => {

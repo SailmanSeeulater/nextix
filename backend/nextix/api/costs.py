@@ -4,7 +4,7 @@ Costs live only on `runs` (cost_usd, tokens). On a Claude plan they are Claude C
 estimates: nothing is billed per run, but they show how the allowance is being used.
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
@@ -37,9 +37,14 @@ async def get_costs(
     settings: Annotated[Settings, Depends(get_settings)],
     days: Annotated[int, Query(ge=1, le=365)] = 30,
 ) -> dict[str, Any]:
-    since = datetime.now(UTC) - timedelta(days=days)
-    # A run's day is when it was queued (UTC); every run has a queued_at.
-    day = cast(Run.queued_at, Date).label("day")
+    # The window is `days` whole UTC days, today included, so the totals and the by_day
+    # buckets always cover the same runs.
+    today = datetime.now(UTC).date()
+    start = today - timedelta(days=days - 1)
+    since = datetime.combine(start, time.min, tzinfo=UTC)
+    # A run's day is when it was queued, in UTC; every run has a queued_at. A plain cast
+    # to date would use the database session's time zone instead.
+    day = cast(func.timezone("UTC", Run.queued_at), Date).label("day")
     measures = (
         func.coalesce(func.sum(cast(Run.cost_usd, Numeric(12, 4))), 0).label("cost_usd"),
         func.coalesce(func.sum(Run.input_tokens), 0).label("input_tokens"),
@@ -76,16 +81,9 @@ async def get_costs(
 
     # Every day in the window, including days with no runs, so charts have no gaps.
     by_day_map = {row.day: _totals(row) for row in by_day_rows}
-    start: date = since.date()
     empty = {"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
-    by_day = [
-        {
-            "date": (start + timedelta(days=i)).isoformat(),
-            **by_day_map.get(start + timedelta(days=i), empty),
-        }
-        for i in range(days + 1)
-        if start + timedelta(days=i) <= datetime.now(UTC).date()
-    ]
+    dates = [start + timedelta(days=i) for i in range(days)]
+    by_day = [{"date": d.isoformat(), **by_day_map.get(d, empty)} for d in dates]
     return {
         "days": days,
         # On a plan, costs are Claude Code's estimates, not charges.

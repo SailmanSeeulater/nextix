@@ -5,6 +5,7 @@ are fakes. Git is real, against a temporary bare repository standing in for GitH
 """
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -486,6 +487,34 @@ def test_redaction_covers_token_shapes_and_run_secrets() -> None:
     assert "[REDACTED]" in out
 
 
+def test_base64_of_a_secret_is_found_at_any_offset_and_masked() -> None:
+    redactor = Redactor([CLAUDE_TOKEN])
+    for prefix in ("", "a", "ab", "abc"):
+        raw = f"{prefix}{CLAUDE_TOKEN}!".encode()
+        for encode in (base64.b64encode, base64.urlsafe_b64encode):
+            padded = encode(raw).decode()
+            for form in (padded, padded.rstrip("=")):
+                assert redactor.has_secret(f"data: {form}\n")
+                assert redactor.text(form).count("[REDACTED]") == 1
+    # Unrelated base64 and text are left alone.
+    other = base64.b64encode(b"just some ordinary bytes, nothing secret").decode()
+    assert not redactor.has_secret(other)
+    assert redactor.text(other) == other
+
+
+def test_secret_scan_reads_through_nuls_and_undecodable_bytes() -> None:
+    redactor = Redactor([CLAUDE_TOKEN])
+    raw = b"+\x00\xff\xf0" + CLAUDE_TOKEN.encode() + b"\xe2\x80\x00\n"
+    assert redactor.has_secret(raw.decode("utf-8", "replace"))
+
+
+def test_short_secrets_are_not_matched_in_any_form() -> None:
+    redactor = Redactor(["abc1234"])  # under 8 characters
+    assert not redactor.has_secret("abc1234 " + base64.b64encode(b"abc1234").decode())
+    assert runner.base64_forms("abcdefgh")  # 8 characters: in
+    assert all(len(form) >= 8 for form in runner.base64_forms("abcdefgh"))
+
+
 def test_runner_redacts_the_clone_token_in_its_header_form(tmp_path: Path) -> None:
     instance, _ = make_runner(tmp_path, tmp_path / "origin.git", ScriptedQuery())
     encoded = runner.github_auth_env(CLONE_TOKEN)["GIT_CONFIG_VALUE_0"].rsplit(" ", 1)[-1]
@@ -834,6 +863,84 @@ async def test_a_leaked_credential_is_never_bundled(tmp_path: Path, origin: Path
         "secret_in_changes",
         0,
     )
+    assert not bundle_path(tmp_path).exists()
+    assert CLAUDE_TOKEN not in json.dumps(poster.events)
+
+
+def leak_in_a_diff_off_file(repo: Path) -> None:
+    # -diff makes plain `git log --patch` print "Binary files differ".
+    (repo / ".gitattributes").write_text("*.dat -diff\n", encoding="utf-8")
+    (repo / "debug.dat").write_text(f"TOKEN={CLAUDE_TOKEN}\n", encoding="utf-8")
+
+
+def leak_in_a_binary_file(repo: Path) -> None:
+    # NULs make git call it binary; the bytes around the token are not valid UTF-8.
+    (repo / "debug.bin").write_bytes(b"\x00\xff\xf0" + CLAUDE_TOKEN.encode() + b"\xe2\x00\n")
+
+
+def leak_base64(repo: Path) -> None:
+    (repo / "debug.txt").write_text(
+        base64.b64encode(CLAUDE_TOKEN.encode()).decode() + "\n", encoding="utf-8"
+    )
+
+
+def leak_base64_unpadded_in_a_blob(repo: Path) -> None:
+    # Encoded inside something larger, at an offset that is not a multiple of 3.
+    blob = base64.b64encode(f"k={CLAUDE_TOKEN};".encode()).decode().rstrip("=")
+    (repo / "debug.txt").write_text(blob + "\n", encoding="utf-8")
+
+
+def leak_in_the_author(repo: Path) -> None:
+    git(
+        "-c", f"user.name={CLAUDE_TOKEN}", "commit", "--quiet", "--allow-empty", "-m", "x", cwd=repo
+    )
+    (repo / "hello.txt").write_text("hello\n", encoding="utf-8")
+
+
+def leak_in_a_merge(repo: Path) -> None:
+    # Only the merge itself adds the file, and plain `git log --patch` shows no merge diff.
+    branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo).strip()
+    git("checkout", "--quiet", "-b", "side", cwd=repo)
+    (repo / "side.txt").write_text("side\n", encoding="utf-8")
+    git("add", "side.txt", cwd=repo)
+    git("commit", "--quiet", "-m", "side", cwd=repo)
+    git("checkout", "--quiet", branch, cwd=repo)
+    git("merge", "--quiet", "--no-ff", "--no-commit", "side", cwd=repo)
+    (repo / "debug.env").write_text(f"TOKEN={CLAUDE_TOKEN}\n", encoding="utf-8")
+    git("add", "debug.env", cwd=repo)
+    git("commit", "--quiet", "-m", "merge side", cwd=repo)
+
+
+def leak_behind_a_replace_ref(repo: Path) -> None:
+    # log would show the stand-in commit; `git bundle` packs the real one.
+    (repo / "debug.env").write_text(f"TOKEN={CLAUDE_TOKEN}\n", encoding="utf-8")
+    git("add", "debug.env", cwd=repo)
+    git("commit", "--quiet", "-m", "debug", cwd=repo)
+    stand_in = git("commit-tree", "HEAD~1^{tree}", "-p", "HEAD~1", "-m", "debug", cwd=repo)
+    git("replace", "HEAD", stand_in.strip(), cwd=repo)
+    (repo / "debug.env").unlink()  # the deletion is diffed against the stand-in: nothing
+    (repo / "hello.txt").write_text("hello\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "leak",
+    [
+        leak_in_a_diff_off_file,
+        leak_in_a_binary_file,
+        leak_base64,
+        leak_base64_unpadded_in_a_blob,
+        leak_in_the_author,
+        leak_in_a_merge,
+        leak_behind_a_replace_ref,
+    ],
+)
+async def test_a_hidden_credential_is_never_bundled(
+    tmp_path: Path, origin: Path, leak: Callable[[Path], None]
+) -> None:
+    instance, poster = make_runner(tmp_path, origin, ScriptedQuery(result_message(), edit=leak))
+    assert await instance.run() == EXIT_FAILED
+    result = read_result(tmp_path)
+    assert (result["status"], result["exit_reason"]) == ("failed", "secret_in_changes")
     assert not bundle_path(tmp_path).exists()
     assert CLAUDE_TOKEN not in json.dumps(poster.events)
 

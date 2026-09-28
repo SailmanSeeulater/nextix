@@ -14,6 +14,7 @@ from nextix.api.deps import get_github
 from nextix.config import Settings, get_settings
 from nextix.db.models import Artifact, Repo, Ticket
 from nextix.db.session import get_db
+from nextix.github.app_auth import GitHubAuthError, GitHubNotConfiguredError
 from nextix.github.client import DiffTooLarge, GitHubClient
 from nextix.runs.artifacts import CONTENT_TYPES, resolve_path
 
@@ -67,6 +68,14 @@ async def get_diff(
     except httpx.HTTPError as exc:
         log.warning("could not read the diff of %s#%s: %s", repo.full_name, ticket.pr_number, exc)
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "GitHub didn't return the diff") from exc
+    except (GitHubAuthError, GitHubNotConfiguredError) as exc:
+        # No installation token (app not configured, suspended, or uninstalled): GitHub is
+        # the upstream that failed, not this API, so a 502 rather than an opaque 500.
+        log.warning("could not read the diff of %s#%s: %s", repo.full_name, ticket.pr_number, exc)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"nexTix couldn't authenticate to GitHub to read the diff: {exc}",
+        ) from exc
     return {
         "pr_number": ticket.pr_number,
         "head_sha": ticket.pr_head_sha,

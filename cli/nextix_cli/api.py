@@ -21,8 +21,20 @@ class ApiError(Exception):
 class NextixApi:
     def __init__(self, base_url: str, token: str, http: httpx.Client | None = None) -> None:
         self._base = base_url.rstrip("/")
+        # Only a client we made is ours to close; an injected one belongs to the caller.
+        self._owns_http = http is None
         self._http = http or httpx.Client()
         self._headers = {"Authorization": f"Bearer {token}"}
+
+    def close(self) -> None:
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self) -> "NextixApi":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
     def _request(self, method: str, path: str, *, timeout: float, **kwargs: Any) -> Any:
         try:
@@ -43,7 +55,8 @@ class NextixApi:
         return resp.json()
 
     def check(self) -> None:
-        self._request("GET", "/api/tickets", timeout=DEFAULT_TIMEOUT_S)
+        # Any authenticated endpoint proves the token; the repo list is small, the board isn't.
+        self._request("GET", "/api/repos", timeout=DEFAULT_TIMEOUT_S)
 
     def create_ticket(
         self,

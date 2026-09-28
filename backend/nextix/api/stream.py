@@ -6,6 +6,7 @@ client knows it can't miss events published after that point.
 """
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
@@ -17,19 +18,28 @@ from nextix.api.auth import require_user
 from nextix.api.deps import get_redis
 from nextix.events.stream import BOARD_CHANNEL, subscription
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["stream"], dependencies=[Depends(require_user)])
 
 PING_INTERVAL_S = 15
+
+
+async def board_events(client: aioredis.Redis) -> AsyncIterator[dict[str, Any]]:
+    """The SSE events: ``ready``, then every board message as it is published."""
+    async with subscription(client, BOARD_CHANNEL) as messages:
+        yield {"event": "ready", "data": "{}"}
+        async for msg in messages:
+            # One malformed message (valid JSON, but not from our publisher) mustn't end
+            # every open board's stream.
+            if not isinstance(msg, dict) or "event" not in msg or "data" not in msg:
+                log.warning("skipping a malformed board message: %.200r", msg)
+                continue
+            yield {"event": msg["event"], "data": json.dumps(msg["data"])}
 
 
 @router.get("/stream")
 async def board_stream(
     client: Annotated[aioredis.Redis, Depends(get_redis)],
 ) -> EventSourceResponse:
-    async def events() -> AsyncIterator[dict[str, Any]]:
-        async with subscription(client, BOARD_CHANNEL) as messages:
-            yield {"event": "ready", "data": "{}"}
-            async for msg in messages:
-                yield {"event": msg["event"], "data": json.dumps(msg["data"])}
-
-    return EventSourceResponse(events(), ping=PING_INTERVAL_S)
+    return EventSourceResponse(board_events(client), ping=PING_INTERVAL_S)

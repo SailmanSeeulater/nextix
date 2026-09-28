@@ -17,6 +17,7 @@ from pathlib import Path
 import httpx
 import redis.asyncio as aioredis
 from celery import Task
+from celery.exceptions import SoftTimeLimitExceeded
 from celery.signals import worker_ready
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -27,7 +28,13 @@ from nextix.config import get_settings
 from nextix.events.stream import RedisPublisher
 from nextix.github.app_auth import GitHubAppAuth
 from nextix.github.client import GitHubClient
-from nextix.runs.executor import RepoBusy, WorkerContext, execute_run, sweep_orphans
+from nextix.runs.executor import (
+    RepoBusy,
+    WorkerContext,
+    execute_run,
+    sweep_orphans,
+    time_out_run,
+)
 from nextix.runs.lifecycle import start_pending_reviews
 from nextix.runs.push import GitBundlePusher
 from nextix.runs.reaper import reap
@@ -66,6 +73,11 @@ async def worker_context(*, sandbox: Sandbox | None) -> AsyncIterator[WorkerCont
 async def _execute(run_id: uuid.UUID) -> None:
     async with worker_context(sandbox=DockerSandbox()) as ctx:
         await execute_run(run_id, ctx)
+
+
+async def _time_out(run_id: uuid.UUID) -> None:
+    async with worker_context(sandbox=_reaper_sandbox()) as ctx:
+        await time_out_run(run_id, ctx)
 
 
 def _reaper_sandbox() -> Sandbox | None:
@@ -128,6 +140,12 @@ def execute_run_task(self: Task, run_id: str) -> None:  # type: ignore[type-arg]
     except RepoBusy:
         # The run stays queued ("Waiting for a worker" on the board) until a slot frees.
         raise self.retry(countdown=REPO_BUSY_RETRY_S) from None
+    except SoftTimeLimitExceeded:
+        # Raised wherever the run happened to be; the executor's `finally` has removed the
+        # sandbox by now (asyncio.run cancels and finishes the run's coroutine). End the
+        # run here, in a fresh event loop, rather than leave it to the reaper.
+        log.warning("run %s reached the worker's time limit", run_id)
+        asyncio.run(_time_out(uuid.UUID(run_id)))
 
 
 @celery_app.task(name="nextix.reap_runs", ignore_result=True)

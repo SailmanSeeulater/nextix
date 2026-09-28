@@ -26,6 +26,10 @@ def config_path() -> Path:
     return config_dir() / "config.toml"
 
 
+class ConfigError(Exception):
+    """The config file can't be used. The message is safe to show the user."""
+
+
 @dataclass
 class CliConfig:
     api_url: str = DEFAULT_API_URL
@@ -37,7 +41,12 @@ def load() -> CliConfig:
     cfg = CliConfig()
     path = config_path()
     if path.is_file():
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(
+                f"{path} isn't valid TOML ({exc}). Fix it, or delete it and run `nextix login`."
+            ) from exc
         cfg.api_url = str(data.get("api_url", cfg.api_url))
         cfg.token = str(data.get("token", ""))
         cfg.default_repo = str(data.get("default_repo", ""))
@@ -58,7 +67,11 @@ def save(cfg: CliConfig) -> Path:
     ]
     if cfg.default_repo:
         lines.append(f"default_repo = {json.dumps(cfg.default_repo)}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Create it 0600 rather than chmod afterwards, so the token is never briefly readable by
+    # others. The mode only applies to a new file, hence the chmod for one that already exists.
+    fd = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
     with contextlib.suppress(OSError):  # some Windows filesystems ignore modes
         path.chmod(0o600)
     return path

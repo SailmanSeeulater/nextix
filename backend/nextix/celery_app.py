@@ -17,7 +17,7 @@ celery_app = Celery(
     "nextix",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["nextix.runs.tasks"],
+    include=["nextix.runs.tasks", "nextix.housekeeping"],
 )
 celery_app.conf.update(
     task_acks_late=True,
@@ -39,6 +39,11 @@ celery_app.conf.update(
     task_routes={"nextix.execute_run": {"queue": "runs"}},
     beat_schedule={
         "reap-runs": {"task": "nextix.reap_runs", "schedule": 30.0},
+        # Old webhook dedupe rows (see nextix/housekeeping.py).
+        "prune-webhook-deliveries": {
+            "task": "nextix.prune_webhook_deliveries",
+            "schedule": 24 * 60 * 60.0,
+        },
     },
 )
 

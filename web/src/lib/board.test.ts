@@ -15,6 +15,7 @@ import {
   isStalled,
   liveness,
   mergeHeartbeats,
+  parseBoardEvent,
   passFields,
   repoLabels,
   repoOptions,
@@ -71,6 +72,25 @@ describe("applyEvent", () => {
     const start = indexCards([card()]);
     expect(applyEvent(start, { type: "ticket.removed", data: { id: "t1" } })).toEqual({});
     expect(applyEvent(start, { type: "ticket.removed", data: { id: "zz" } })).toBe(start);
+  });
+});
+
+describe("parseBoardEvent", () => {
+  it("reads a message with an id", () => {
+    expect(parseBoardEvent("ticket.removed", '{"id":"t1"}')).toEqual({
+      type: "ticket.removed",
+      data: { id: "t1" },
+    });
+    expect(parseBoardEvent("ticket.updated", '{"id":"t1","title":"x"}')).toEqual({
+      type: "ticket.updated",
+      data: { id: "t1", title: "x" },
+    });
+  });
+
+  it("drops malformed messages instead of throwing", () => {
+    for (const data of ["", "{", "null", "42", '"t1"', "[]", '{"id":7}', "{}"]) {
+      expect(parseBoardEvent("ticket.updated", data)).toBeNull();
+    }
   });
 });
 

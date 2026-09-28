@@ -8,8 +8,10 @@ pusher, the publisher), so the whole flow is testable with fakes.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
+import math
 import os
 import secrets
 import socket
@@ -22,7 +24,8 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from celery.exceptions import SoftTimeLimitExceeded
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -44,8 +47,8 @@ from nextix.runs.config import (
     load_repo_config,
 )
 from nextix.runs.lifecycle import RunEnqueuer, record_transition, start_pending_review
-from nextix.runs.push import BranchPusher, PushError
-from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, Sandbox, SandboxSpec
+from nextix.runs.push import BranchPusher, SecretInChanges
+from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, FileTooLarge, Sandbox, SandboxSpec
 from nextix.runs.state import ACTIVE_STATUSES, TERMINAL_STATUSES, RunStatus
 from nextix.tickets.service import NEEDS_INPUT_LABEL, is_trusted
 
@@ -55,6 +58,22 @@ log = logging.getLogger(__name__)
 # character) and far above any real issue.
 MAX_ISSUE_BODY_CHARS = 20_000
 MAX_CLARIFICATION_CHARS = 8_000
+
+# What the worker will hold in memory from the sandbox's out directory, which the agent
+# can write to: a branch bundle far larger than any real change, a result.json of any
+# sensible size. An oversized result.json counts as unreadable.
+MAX_BUNDLE_BYTES = 200 * 1024 * 1024
+MAX_RESULT_BYTES = 1024 * 1024
+
+# The columns the sandbox's numbers end up in: runs.cost_usd is Numeric(10, 4), the token
+# counts are Integer.
+MAX_COST_USD = 999_999.0
+MAX_COUNT = 2**31 - 1
+
+
+def finite(value: float) -> float | None:
+    """`value`, unless it is NaN or infinite (json.loads accepts both; Postgres doesn't)."""
+    return value if math.isfinite(value) else None
 
 
 class RunResult(BaseModel):
@@ -73,6 +92,18 @@ class RunResult(BaseModel):
     num_turns: int = 0
     tests: dict[str, Any] | None = None
 
+    @field_validator("cost_usd")
+    @classmethod
+    def _cost(cls, value: float) -> float:
+        # Written by the sandbox: a NaN would make `max` in _record_usage raise.
+        cost = finite(value)
+        return min(cost, MAX_COST_USD) if cost is not None and cost > 0 else 0.0
+
+    @field_validator("input_tokens", "output_tokens", "num_turns")
+    @classmethod
+    def _count(cls, value: int) -> int:
+        return min(max(value, 0), MAX_COUNT)
+
 
 def clean_tests(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     """result.json's `tests`, reduced to the documented fields with the right types."""
@@ -82,15 +113,18 @@ def clean_tests(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     passed, duration = raw.get("passed"), raw.get("duration_s")
     if not isinstance(command, str) or not isinstance(passed, bool):
         return None
+    seconds: float | None = None
+    if isinstance(duration, int | float) and not isinstance(duration, bool):
+        # float() of a huge int overflows; NaN and infinity can't be stored as JSONB.
+        with contextlib.suppress(OverflowError):
+            seconds = finite(float(duration))
     return {
         "command": redact(command)[:1000],
         "exit_code": exit_code
         if isinstance(exit_code, int) and not isinstance(exit_code, bool)
         else None,
         "passed": passed,
-        "duration_s": float(duration)
-        if isinstance(duration, int | float) and not isinstance(duration, bool)
-        else None,
+        "duration_s": seconds,
     }
 
 
@@ -272,7 +306,9 @@ def fit_task(task: dict[str, Any]) -> str:
 
     def shorten_body() -> None:
         body = task["body"].removesuffix(_CUT)
-        task["body"] = body[: len(body) * 3 // 4] + _CUT
+        kept = body[: len(body) * 3 // 4]
+        # Once nothing is left, drop the marker too: re-appending it forever never fits.
+        task["body"] = kept + _CUT if kept else ""
 
     while size() > MAX_TASK_BYTES and len(task["body"].encode()) > MAX_TASK_BYTES // 3:
         shorten_body()
@@ -280,10 +316,17 @@ def fit_task(task: dict[str, Any]) -> str:
         task["review_comments"].pop()
     while size() > MAX_TASK_BYTES and task["body"]:
         shorten_body()
+    # The title and the repo's extra instructions have their own limits, but this must
+    # terminate with a task that fits whatever it is given.
+    for key in ("extra_instructions", "title"):
+        while size() > MAX_TASK_BYTES and task[key]:
+            task[key] = task[key][: len(task[key]) * 3 // 4]
     return json.dumps(task, ensure_ascii=False)
 
 
 _CUT = "\n\n… [cut: too long]"
+# Before the one retry of a GitHub read the run can't do without.
+GITHUB_RETRY_DELAY_S = 2.0
 
 
 async def review_comments_for(
@@ -302,24 +345,33 @@ async def review_comments_for(
     if run.review_id is None or ticket.pr_number is None:
         return []
     comments: list[dict[str, Any]] = []
-    try:
+    pr_number, review_id = ticket.pr_number, run.review_id
+
+    async def read() -> tuple[Any, list[Any]]:
         review = await ctx.gh.get_review(
-            repo.installation_id, repo.owner, repo.name, ticket.pr_number, run.review_id
+            repo.installation_id, repo.owner, repo.name, pr_number, review_id
         )
         inline = await ctx.gh.list_review_comments(
-            repo.installation_id, repo.owner, repo.name, ticket.pr_number, run.review_id
+            repo.installation_id, repo.owner, repo.name, pr_number, review_id
         )
+        return review, inline
+
+    # The review is what this run is about: without it the agent would work blind. One
+    # retry for a blip, then the error reaches the caller, which fails the run with
+    # github_error (Retry reads the review again).
+    try:
+        review, inline = await read()
     except Exception:
-        log.exception("could not read review %s for run %s", run.review_id, run.id)
-        return []
+        log.warning("could not read review %s for run %s; retrying", review_id, run.id)
+        await asyncio.sleep(GITHUB_RETRY_DELAY_S)
+        review, inline = await read()
     author = review.user.login if review.user else None
     if (review.body or "").strip():
         comments.append(
             {"author": author, "body": redact(review.body or "")[:MAX_REVIEW_COMMENT_CHARS]}
         )
-    for item in inline[:MAX_REVIEW_COMMENTS]:
-        if not (item.body or "").strip():
-            continue
+    # Blank comments are dropped first, so they don't use up MAX_REVIEW_COMMENTS.
+    for item in [c for c in inline if (c.body or "").strip()][:MAX_REVIEW_COMMENTS]:
         comments.append(
             {
                 "path": item.path,
@@ -678,6 +730,9 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
         loaded = await _load(session, run_id)
         assert loaded is not None
         run, ticket, repo = loaded
+        # Kept apart: after a rollback the ORM objects are expired, and reloading an
+        # attribute implicitly isn't possible under asyncio.
+        ticket_id = ticket.id
 
         if resolve(ctx.settings) is ClaudeAuth.NONE:
             await _finish(
@@ -725,18 +780,50 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
         run.model = ctx.settings.model_for(list(ticket.labels))
         await session.commit()
 
-        container_id: str | None = None
-        keep_alive: asyncio.Task[None] | None = None
-        files: dict[str, bytes] | None = None
-        outcome = "exited"
-        result: RunResult | None = None
-        bundle: bytes | None = None
         try:
             clone_token = await ctx.gh.auth.scoped_token(
                 repo.installation_id, repository=repo.name, permissions={"contents": "read"}
             )
             clarification = await clarification_for(session, run, ticket, repo, ctx)
             review_comments = await review_comments_for(run, ticket, repo, ctx)
+        except SoftTimeLimitExceeded:
+            raise  # the task's handler times the run out
+        except Exception as exc:
+            # Nothing has started yet; this is GitHub (or the app's credentials), not the
+            # sandbox, and Retry is the fix once GitHub answers again.
+            log.exception("could not prepare run %s from GitHub", run_id)
+            await _finish(
+                session,
+                run,
+                RunStatus.FAILED,
+                ctx,
+                exit_reason="github_error",
+                comment=(
+                    "❌ Failed: could not read what the run needs from GitHub "
+                    f"({redact(str(exc))[:200]}). Retry once GitHub is reachable."
+                ),
+            )
+            return
+
+        if ctx.settings.agent_proxy_url.strip() and not ctx.settings.agent_network:
+            # The proxy variables only help tools that honour them; without the internal
+            # network nothing stops the agent from going around the proxy.
+            log.warning(
+                "run %s: AGENT_PROXY_URL is set but AGENT_NETWORK is empty, so the sandbox "
+                "is on the default bridge with full internet access; the egress allowlist "
+                "is advisory only",
+                run_id,
+            )
+
+        container_id: str | None = None
+        keep_alive: asyncio.Task[None] | None = None
+        files: dict[str, bytes] | None = None
+        outcome = "exited"
+        result: RunResult | None = None
+        bundle: bytes | None = None
+        bundle_too_large = False
+        sandbox_secrets: dict[str, str] = {}
+        try:
             env = sandbox_env(
                 settings=ctx.settings,
                 run=run,
@@ -759,17 +846,29 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                 nano_cpus=int(ctx.settings.agent_cpus * 1_000_000_000),
                 pids_limit=ctx.settings.agent_pids_limit,
             )
+            sandbox_secrets = dict(spec.secrets)
             container_id = await asyncio.to_thread(ctx.sandbox.start, spec)
             run.container_id = container_id
             await session.commit()
             outcome = await _wait(session, run, container_id, ctx, limits.timeout_min)
             keep_alive = asyncio.create_task(_keep_alive(ctx, run.id))
-            result = _parse_result(
-                await asyncio.to_thread(ctx.sandbox.read_file, container_id, RESULT_PATH)
-            )
+            result = _parse_result(await _read_out_file(ctx, container_id, RESULT_PATH))
             if result and result.commits > 0:
-                bundle = await asyncio.to_thread(ctx.sandbox.read_file, container_id, BUNDLE_PATH)
+                try:
+                    bundle = await asyncio.to_thread(
+                        ctx.sandbox.read_file,
+                        container_id,
+                        BUNDLE_PATH,
+                        max_bytes=MAX_BUNDLE_BYTES,
+                    )
+                except FileTooLarge:
+                    log.warning("the bundle of run %s is over the limit", run_id)
+                    bundle_too_large = True
             files = await _read_artifacts(ctx, container_id)
+        except SoftTimeLimitExceeded:
+            if keep_alive:
+                keep_alive.cancel()
+            raise  # the task's handler times the run out; the sandbox is removed below
         except Exception as exc:
             log.exception("sandbox for run %s failed", run_id)
             await _finish(
@@ -802,13 +901,72 @@ async def execute_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
                 outcome=outcome,
                 result=result,
                 bundle=bundle,
+                bundle_too_large=bundle_too_large,
+                sandbox_secrets=sandbox_secrets,
                 limits=limits,
                 shots=collected.artifacts,
             )
+        except SoftTimeLimitExceeded:
+            raise
+        except Exception as exc:
+            # Anything unexpected while publishing (a database error, a bug) must still end
+            # the run now, not leave it running until the reaper calls it heartbeat_lost.
+            log.exception("publishing run %s failed", run_id)
+            await _fail_publish(session, run, ctx, exc)
         finally:
             if keep_alive:
                 keep_alive.cancel()
-        await _start_pending_review(session, run.ticket_id, ctx)
+        await _start_pending_review(session, ticket_id, ctx)
+
+
+async def _fail_publish(
+    session: AsyncSession, run: Run, ctx: WorkerContext, exc: Exception
+) -> None:
+    """Fail a run whose publishing broke; a no-op if it already ended."""
+    run_id = run.id
+    try:
+        await session.rollback()  # the error may have left the transaction unusable
+        await _finish(
+            session,
+            run,
+            RunStatus.FAILED,
+            ctx,
+            exit_reason="publish_failed",
+            comment=f"❌ Failed: could not publish the run's work ({redact(str(exc))[:200]}).",
+        )
+    except Exception:
+        log.exception("could not fail run %s; the reaper will", run_id)
+
+
+async def _read_out_file(ctx: WorkerContext, container_id: str, path: str) -> bytes | None:
+    """A small file from the sandbox's out directory; None if it is missing or oversized."""
+    try:
+        return await asyncio.to_thread(
+            ctx.sandbox.read_file, container_id, path, max_bytes=MAX_RESULT_BYTES
+        )
+    except FileTooLarge:
+        log.warning("%s in %s is over %d bytes; ignored", path, container_id[:12], MAX_RESULT_BYTES)
+        return None
+
+
+async def time_out_run(run_id: uuid.UUID, ctx: WorkerContext) -> None:
+    """The worker's hard deadline for the run is near (Celery's soft time limit): stop its
+    sandbox and time it out, unless it already ended."""
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(ctx.sandbox.kill_run, run_id)
+    async with ctx.sessions() as session:
+        run = await session.get(Run, run_id, populate_existing=True)
+        if run is None or run.status not in (RunStatus.CLAIMED, RunStatus.RUNNING):
+            return  # never claimed, or already over
+        await _finish(
+            session,
+            run,
+            RunStatus.TIMED_OUT,
+            ctx,
+            exit_reason="timeout",
+            comment="⏱️ Timed out: the worker's time limit for the run was reached; "
+            "the sandbox was stopped.",
+        )
 
 
 async def _start_pending_review(
@@ -848,6 +1006,8 @@ async def _conclude(
     bundle: bytes | None,
     limits: RunLimits,
     shots: list[Artifact],
+    bundle_too_large: bool = False,
+    sandbox_secrets: dict[str, str] | None = None,
 ) -> None:
     await session.refresh(run)
     if run.status in TERMINAL_STATUSES:
@@ -878,17 +1038,37 @@ async def _conclude(
             session, run, RunStatus.FAILED, ctx, exit_reason=result.exit_reason or "agent_error"
         )
         return
+    if result.commits > 0 and bundle_too_large:
+        await _finish(session, run, RunStatus.FAILED, ctx, exit_reason="bundle_too_large")
+        return
     if result.commits <= 0 or not bundle:
         await _finish(session, run, RunStatus.FAILED, ctx, exit_reason="no_changes")
         return
 
+    if not await _still_active(session, run):
+        log.info("run %s ended before publishing; nothing pushed", run.id)
+        return
     try:
-        if not await _still_active(session, run):
-            log.info("run %s ended before publishing; nothing pushed", run.id)
-            return
         write_token = await ctx.gh.auth.scoped_token(
             repo.installation_id, repository=repo.name, permissions={"contents": "write"}
         )
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:
+        log.exception("could not get a write token for run %s", run.id)
+        await _finish(
+            session,
+            run,
+            RunStatus.FAILED,
+            ctx,
+            exit_reason="github_error",
+            comment=(
+                "❌ Failed: GitHub did not grant a token to push the branch "
+                f"({redact(str(exc))[:200]})."
+            ),
+        )
+        return
+    try:
         await asyncio.to_thread(
             ctx.pusher.push,
             repo_full_name=repo.full_name,
@@ -896,20 +1076,45 @@ async def _conclude(
             branch=run.branch or "",
             default_branch=repo.default_branch,
             bundle=bundle,
+            secrets=sandbox_secrets or {},
         )
-        if not await _still_active(session, run):
-            log.info("run %s ended after its push; no pull request opened", run.id)
-            return
-        pr, created = await _open_or_update_pr(run, ticket, repo, ctx, result, shots)
-    except (PushError, Exception) as exc:
-        log.exception("publishing run %s failed", run.id)
+    except SecretInChanges as exc:
+        # Never retried blindly: the same branch would contain the same value.
+        log.error("run %s: not pushed, %s", run.id, exc)
+        await _finish(session, run, RunStatus.FAILED, ctx, exit_reason="secret_in_changes")
+        return
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:  # PushError, or git itself missing or failing to start
+        log.exception("pushing run %s failed", run.id)
         await _finish(
             session,
             run,
             RunStatus.FAILED,
             ctx,
             exit_reason="push_failed",
-            comment=f"❌ Failed: could not publish the branch ({redact(str(exc))[:200]}).",
+            comment=f"❌ Failed: could not push the branch ({redact(str(exc))[:200]}).",
+        )
+        return
+    if not await _still_active(session, run):
+        log.info("run %s ended after its push; no pull request opened", run.id)
+        return
+    try:
+        pr, created = await _open_or_update_pr(run, ticket, repo, ctx, result, shots)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:
+        log.exception("opening the pull request of run %s failed", run.id)
+        await _finish(
+            session,
+            run,
+            RunStatus.FAILED,
+            ctx,
+            exit_reason="pr_failed",
+            comment=(
+                f"❌ Failed: `{run.branch}` was pushed, but GitHub did not open the pull "
+                f"request ({redact(str(exc))[:200]}). Retry will open it."
+            ),
         )
         return
 

@@ -79,7 +79,7 @@ async def test_costs_are_totalled_and_broken_down(
         "runs": 3,
     }
     # One entry per day, including empty ones, oldest first, ending today.
-    assert len(data["by_day"]) == 31
+    assert len(data["by_day"]) == 30
     assert data["by_day"][-1]["date"] == datetime.now(UTC).date().isoformat()
     assert data["by_day"][-1]["cost_usd"] == 0.4
     assert data["by_day"][-3]["cost_usd"] == 1.35
@@ -97,4 +97,4 @@ async def test_costs_need_the_token_and_a_sane_window(client: httpx.AsyncClient)
     assert (await client.get("/api/costs")).status_code == 401
     assert (await client.get("/api/costs?days=0", headers=AUTH)).status_code == 422
     empty = (await client.get("/api/costs?days=7", headers=AUTH)).json()
-    assert empty["total"]["runs"] == 0 and len(empty["by_day"]) == 8
+    assert empty["total"]["runs"] == 0 and len(empty["by_day"]) == 7

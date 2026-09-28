@@ -105,7 +105,9 @@ installs its browsers under `$HOME`) and `NEXTIX_SANDBOX=1` (see "Leftover proce
      that the agent did not touch afterwards (installed files, generated files, a
      rewritten lockfile). If the branch is ahead of its base, a self-contained bundle of
      it is written, unless those commits contain one of the run's own credentials: then
-     the run fails with `secret_in_changes` and nothing is bundled.
+     the run fails with `secret_in_changes` and nothing is bundled. The scan reads every
+     commit's full object and patch, binary files and merges included (replace refs and
+     grafts ignored), and also matches each credential's base64 encoding.
 7. **Checks** (only when the agent succeeded with commits):
    - `setup` again if the agent's commit touched `package.json`, `package-lock.json`,
      `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `requirements*.txt`,

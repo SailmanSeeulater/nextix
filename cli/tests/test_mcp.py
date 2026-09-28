@@ -1,8 +1,10 @@
 """`nextix mcp`: the MCP tools, driven in-process through the MCP client."""
 
 import json
+import threading
 from typing import Any
 
+import anyio
 import httpx
 import pytest
 import respx
@@ -116,6 +118,36 @@ async def test_get_ticket_status_accepts_every_kind_of_reference(ref: str) -> No
     assert result["latest_run"]["status"] == "running"
     assert result["latest_run"]["trigger"] == "review_feedback"
     assert result["runs"] == 1
+
+
+@pytest.mark.anyio
+async def test_a_repo_needs_a_hash_before_the_issue_number() -> None:
+    # Previously parsed as acme/widgets1, issue 2.
+    with respx.mock(base_url=BASE, assert_all_called=False) as api:
+        board = api.get("/api/tickets").respond(200, json=[CARD])
+        result = await call("get_ticket_status", {"ticket": "acme/widgets12"})
+    assert result.is_error and "put # between the repo and the issue" in result.content[0].text
+    assert not board.called
+
+
+@pytest.mark.anyio
+async def test_slow_api_calls_do_not_block_the_server() -> None:
+    # A blocking call on the event loop would stall the second tool call until the first ends.
+    release = threading.Event()
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        release.wait(5)
+        return httpx.Response(200, json=[CARD])
+
+    with respx.mock(base_url=BASE) as api:
+        api.get("/api/tickets", params={"column": "done"}).mock(side_effect=slow)
+        api.get("/api/tickets", params={"column": "todo"}).respond(200, json=[])
+        async with Client(server()) as client, anyio.create_task_group() as tg:
+            tg.start_soon(client.call_tool, "list_tickets", {"column": "done"})
+            with anyio.fail_after(3):
+                quick = await client.call_tool("list_tickets", {"column": "todo"})
+            release.set()
+    assert payload(quick) == []
 
 
 @pytest.mark.anyio

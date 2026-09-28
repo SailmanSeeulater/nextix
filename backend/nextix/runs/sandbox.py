@@ -27,6 +27,13 @@ SECRETS_FILE = "secrets.json"
 SANDBOX_UID = 1000
 RESULT_PATH = f"{OUT_DIR}/result.json"
 BUNDLE_PATH = f"{OUT_DIR}/branch.bundle"
+# Tar framing around a single file: its header, padding, and the end-of-archive blocks
+# (Docker's archives are padded to 10 KiB records).
+TAR_SLACK = 64 * 1024
+
+
+class FileTooLarge(Exception):
+    """A file in the sandbox is bigger than the caller agreed to hold in memory."""
 
 
 def secrets_archive(secrets: dict[str, str]) -> bytes:
@@ -66,8 +73,12 @@ class Sandbox(Protocol):
 
     def is_running(self, container_id: str) -> bool: ...
 
-    def read_file(self, container_id: str, path: str) -> bytes | None:
-        """A file from the (possibly stopped) container, or None if it isn't there."""
+    def read_file(self, container_id: str, path: str, *, max_bytes: int) -> bytes | None:
+        """A file from the (possibly stopped) container, or None if it isn't there.
+
+        Raises FileTooLarge if it is bigger than ``max_bytes``: everything under OUT_DIR
+        is written by the agent, so its size is too.
+        """
         ...
 
     def read_tree(self, container_id: str, path: str, *, max_bytes: int) -> dict[str, bytes] | None:
@@ -145,7 +156,7 @@ class DockerSandbox:
         container.reload()
         return bool(container.status in ("created", "running", "restarting"))
 
-    def read_file(self, container_id: str, path: str) -> bytes | None:
+    def read_file(self, container_id: str, path: str, *, max_bytes: int) -> bytes | None:
         import docker.errors
 
         container = self._get(container_id)
@@ -155,10 +166,18 @@ class DockerSandbox:
             stream, _ = container.get_archive(path)
         except docker.errors.NotFound:
             return None
-        archive = io.BytesIO(b"".join(stream))
+        # Streamed and counted, so an oversized file never ends up in the worker's memory.
+        archive = io.BytesIO()
+        for chunk in stream:
+            archive.write(chunk)
+            if archive.tell() > max_bytes + TAR_SLACK:
+                raise FileTooLarge(f"{path} is over {max_bytes} bytes")
+        archive.seek(0)
         with tarfile.open(fileobj=archive) as tar:
             for member in tar.getmembers():
                 if member.isfile():
+                    if member.size > max_bytes:
+                        raise FileTooLarge(f"{path} is over {max_bytes} bytes")
                     extracted = tar.extractfile(member)
                     return extracted.read() if extracted else None
         return None

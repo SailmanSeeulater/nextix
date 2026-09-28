@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -32,6 +33,7 @@ router = APIRouter(tags=["internal"])
 
 MAX_BODY_BYTES = 5 * 1024 * 1024
 MAX_EVENTS = 500
+MAX_COST_USD = 999_999.0  # numeric(10,4)
 SIGNATURE_HEADER = "X-Nextix-Signature"
 
 
@@ -46,7 +48,10 @@ def signature_ok(secret: str | None, body: bytes, header: str | None) -> bool:
 
 
 def _int(value: Any) -> int:
-    return value if isinstance(value, int) and value >= 0 else 0
+    # bool is an int in Python; the token columns are 32-bit.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return min(value, 2**31 - 1)
 
 
 async def _read_capped(request: Request, limit: int) -> bytes:
@@ -85,7 +90,9 @@ async def run_events(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bad signature")
 
     try:
-        data = json.loads(body)
+        # NaN/Infinity are valid to Python's json but not to Postgres JSONB or the
+        # numeric cost column; read them as null rather than refusing the whole batch.
+        data = json.loads(body, parse_constant=lambda _: None)
         raw_events = data["events"]
         assert isinstance(raw_events, list)
     except (ValueError, KeyError, AssertionError, TypeError) as exc:
@@ -122,7 +129,9 @@ async def run_events(
             run.input_tokens = max(run.input_tokens, _int(payload.get("input_tokens")))
             run.output_tokens = max(run.output_tokens, _int(payload.get("output_tokens")))
             cost = payload.get("cost_usd")
-            if isinstance(cost, int | float) and cost >= 0:
+            if isinstance(cost, int | float) and math.isfinite(cost) and cost >= 0:
+                # Clamp to what numeric(10,4) can hold; a runaway value must not fail the batch.
+                cost = min(cost, MAX_COST_USD)
                 run.cost_usd = max(run.cost_usd, Decimal(str(round(cost, 4))))
         to_store.append((kind, payload))
 

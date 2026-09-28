@@ -69,6 +69,11 @@ runner, the worker, the API and the web app agree.
    - `succeeded` with commits: push the bundle's branch, open or update the PR, link it
      to the ticket, comment "✅ Opened PR #n", `running → succeeded`.
    - `succeeded` without commits: `failed` with `exit_reason = "no_changes"`.
+   - Publishing failures keep their own reasons: `github_error` (GitHub refused a token or
+     read, before the sandbox or before the push), `bundle_too_large` (the bundle is over
+     200 MB; the worker never reads more), `secret_in_changes` (the worker re-scans the
+     branch for the run's credentials before pushing), `push_failed`, `pr_failed` (the
+     branch was pushed; Retry opens the PR), and `publish_failed` for anything else.
    - `needs_input`: comment the question, add `nextix:needs-input`, `running → needs_input`.
    - anything else: `failed` / `timed_out` with a comment.
 
@@ -158,4 +163,5 @@ using `ticket.updated` for card changes.
 ## Done when (spec)
 
 A simple ticket goes Todo → Doing → In Review with a real PR; killing the container
-mid-run moves the ticket to Failed with a comment within about 90 s; retry works.
+mid-run moves the ticket to Failed with a comment within about two minutes (the 90 s
+heartbeat timeout plus up to 30 s until the next reaper beat); retry works.

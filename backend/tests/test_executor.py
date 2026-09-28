@@ -32,7 +32,7 @@ from nextix.runs.executor import (
 )
 from nextix.runs.push import GitBundlePusher, PushError
 from nextix.runs.reaper import reap
-from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, SandboxSpec
+from nextix.runs.sandbox import BUNDLE_PATH, RESULT_PATH, FileTooLarge, SandboxSpec
 from tests.conftest import FakePublisher
 
 PLAN_TOKEN = "sk-ant-oat01-" + "p" * 40
@@ -82,12 +82,15 @@ class FakeSandbox:
         self.polls -= 1
         return self.polls >= 0
 
-    def read_file(self, container_id: str, path: str) -> bytes | None:
+    def read_file(self, container_id: str, path: str, *, max_bytes: int) -> bytes | None:
+        content = None
         if path == RESULT_PATH:
-            return json.dumps(self.result).encode() if self.result is not None else None
-        if path == BUNDLE_PATH:
-            return self.bundle
-        return None
+            content = json.dumps(self.result).encode() if self.result is not None else None
+        elif path == BUNDLE_PATH:
+            content = self.bundle
+        if content is not None and len(content) > max_bytes:
+            raise FileTooLarge(path)
+        return content
 
     def read_tree(self, container_id: str, path: str, *, max_bytes: int) -> dict[str, bytes] | None:
         return self.tree

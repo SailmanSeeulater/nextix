@@ -5,6 +5,9 @@ and diff images on the repo's `nextix/screenshots` branch (an orphan branch that
 ever holds images, never merged) and comments on the PR with the images side by side, so
 the change can be reviewed on GitHub, including on a phone. Routes with no visible change
 are listed but not shown; a run with no visible change posts nothing.
+
+Each publish adds a commit to that branch and nothing is ever pruned, so it grows with
+every run that changes a page (known; old attempts can be deleted by hand).
 """
 
 import logging
@@ -27,6 +30,17 @@ MAX_ROUTES_SHOWN = 10
 def route_slug(label: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", label).strip("-").lower()
     return slug or "root"
+
+
+def unique_slug(label: str, taken: set[str]) -> str:
+    """route_slug, numbered when another route of the same publish already has it
+    (`/a-b` and `/a/b` are both `a-b`), so one route's images never replace another's."""
+    base = slug = route_slug(label)
+    n = 2
+    while slug in taken:
+        slug, n = f"{base}-{n}", n + 1
+    taken.add(slug)
+    return slug
 
 
 def _changed(diff: Artifact) -> bool:
@@ -108,18 +122,28 @@ async def publish_screenshots(
 
     files: dict[str, bytes] = {}
     stored: dict[str, dict[str, str]] = {}
+    slugs: set[str] = set()
     folder = f"issue-{ticket.issue_number}/attempt-{run.attempt}"
     for label in sorted(changed)[:MAX_ROUTES_SHOWN]:
         kinds = by_route[label]
+        slug = unique_slug(label, slugs)
+        route_files: dict[str, bytes] = {}
         paths: dict[str, str] = {}
         for kind in ("before", "after", "diff"):
-            source = resolve_path(artifact_dir, kinds[kind])
-            if source is None:
+            try:
+                source = resolve_path(artifact_dir, kinds[kind])
+                content = source.read_bytes() if source is not None else None
+            except (OSError, ValueError):  # gone, unreadable, or a path the OS rejects
+                log.warning("could not read the %s screenshot of %s", kind, label)
+                content = None
+            if content is None:
                 break
-            path = f"{folder}/{route_slug(label)}-{kind}.png"
-            files[path] = source.read_bytes()
+            path = f"{folder}/{slug}-{kind}.png"
+            route_files[path] = content
             paths[kind] = path
         else:
+            # Only a route with all three images is committed and shown.
+            files.update(route_files)
             pct = (kinds["diff"].meta or {}).get("diff_pct")
             paths["pct"] = (
                 f" · {pct:.2f}% of pixels changed" if isinstance(pct, float | int) and pct else ""

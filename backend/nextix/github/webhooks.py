@@ -343,10 +343,21 @@ async def _board_tickets_for_installation(
 
 
 async def _reconcile(
-    session: AsyncSession, gh: GitHubClient, installation_id: int, *, enable: list[str]
+    session: AsyncSession,
+    gh: GitHubClient,
+    installation_id: int,
+    *,
+    enable: list[str],
+    enable_all: bool = False,
 ) -> DispatchResult:
-    """Ask GitHub which repos the installation covers now, and match our rows to it."""
+    """Ask GitHub which repos the installation covers now, and match our rows to it.
+
+    ``enable_all`` switches every accessible repo back on: after an unsuspend or a
+    reinstall, the rows a suspend / uninstall disabled are live again.
+    """
     accessible = await gh.list_installation_repos(installation_id)
+    if enable_all:
+        enable = [r.full_name for r in accessible]
     result = await service.reconcile_installation_repos(
         session, installation_id, accessible, enable=enable
     )
@@ -359,7 +370,11 @@ async def handle_installation(
 ) -> DispatchResult:
     installation = GhInstallation.model_validate(payload["installation"])
     action = payload.get("action")
-    if action in ("created", "unsuspend", "new_permissions_accepted"):
+    if action in ("created", "unsuspend"):
+        # Suspending (and uninstalling) disabled the repos but kept them; the app has
+        # access again, so every repo it can reach is back on the board.
+        return await _reconcile(session, gh, installation.id, enable=[], enable_all=True)
+    if action == "new_permissions_accepted":
         return await _reconcile(session, gh, installation.id, enable=[])
     if action == "suspend":
         # Keep rows so unsuspending restores them; GitHub stops sending events meanwhile.

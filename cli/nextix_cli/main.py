@@ -42,11 +42,22 @@ def _fail(message: str) -> typer.Exit:
     return typer.Exit(code=1)
 
 
-def _api() -> tuple[NextixApi, config.CliConfig]:
-    cfg = config.load()
+def _load_config() -> config.CliConfig:
+    try:
+        return config.load()
+    except config.ConfigError as exc:
+        raise _fail(str(exc)) from exc
+
+
+def _signed_in() -> config.CliConfig:
+    cfg = _load_config()
     if not cfg.token:
         raise _fail("Not signed in. Run `nextix login` first.")
-    return NextixApi(cfg.api_url, cfg.token), cfg
+    return cfg
+
+
+def _client(cfg: config.CliConfig) -> NextixApi:
+    return NextixApi(cfg.api_url, cfg.token)
 
 
 def _repo(option: str | None, cfg: config.CliConfig) -> str:
@@ -67,7 +78,7 @@ def login(
     repo: Annotated[str | None, typer.Option(help="Default repo (owner/name)")] = None,
 ) -> None:
     """Save the API URL and token, and check they work."""
-    current = config.load()
+    current = _load_config()
     url = api_url or typer.prompt("nexTix API URL", default=current.api_url)
     token = typer.prompt("API token (NEXTIX_API_TOKEN)", hide_input=True)
     default_repo = (
@@ -76,7 +87,8 @@ def login(
         else typer.prompt("Default repo, owner/name (optional)", default=current.default_repo or "")
     )
     try:
-        NextixApi(url, token).check()
+        with NextixApi(url, token) as api:
+            api.check()
     except ApiError as exc:
         raise _fail(exc.message) from exc
     path = config.save(
@@ -101,18 +113,19 @@ def new(
     as_json: Annotated[bool, typer.Option("--json", help="Print the raw API response.")] = False,
 ) -> None:
     """Turn a prompt into a GitHub issue and put it on the board."""
-    api, cfg = _api()
+    cfg = _signed_in()
     target = _repo(repo, cfg)
     try:
-        if no_triage or as_json:
-            result = api.create_ticket(
-                repo=target, prompt=prompt, labels=label or [], triage=not no_triage
-            )
-        else:
-            with err.status("Writing the issue with Claude…"):
+        with _client(cfg) as api:
+            if no_triage or as_json:
                 result = api.create_ticket(
-                    repo=target, prompt=prompt, labels=label or [], triage=True
+                    repo=target, prompt=prompt, labels=label or [], triage=not no_triage
                 )
+            else:
+                with err.status("Writing the issue with Claude…"):
+                    result = api.create_ticket(
+                        repo=target, prompt=prompt, labels=label or [], triage=True
+                    )
     except ApiError as exc:
         raise _fail(exc.message) from exc
 
@@ -144,9 +157,10 @@ def list_tickets(
     as_json: Annotated[bool, typer.Option("--json", help="Print the raw API response.")] = False,
 ) -> None:
     """List tickets on the board."""
-    api, cfg = _api()
+    cfg = _signed_in()
     try:
-        tickets = api.list_tickets(repo=repo or cfg.default_repo or None, column=column)
+        with _client(cfg) as api:
+            tickets = api.list_tickets(repo=repo or cfg.default_repo or None, column=column)
     except ApiError as exc:
         raise _fail(exc.message) from exc
     if as_json:
@@ -155,8 +169,9 @@ def list_tickets(
     if not tickets:
         out.print("No tickets.")
         return
-    order = list(COLUMN_NAMES)
-    tickets.sort(key=lambda t: (order.index(t["column"]), t["repo"], t["issue_number"]))
+    # A column this CLI doesn't know yet (a newer backend) sorts last rather than crashing.
+    order = {name: i for i, name in enumerate(COLUMN_NAMES)}
+    tickets.sort(key=lambda t: (order.get(t["column"], len(order)), t["repo"], t["issue_number"]))
     table = Table(box=None, pad_edge=False, header_style="bold")
     table.add_column("#", justify="right")
     table.add_column("Status")
@@ -188,10 +203,11 @@ def open_ticket(
     ] = False,
 ) -> None:
     """Open a ticket's issue (or its PR) in the browser."""
-    api, cfg = _api()
+    cfg = _signed_in()
     target = _repo(repo, cfg)
     try:
-        tickets = api.list_tickets(repo=target)
+        with _client(cfg) as api:
+            tickets = api.list_tickets(repo=target)
     except ApiError as exc:
         raise _fail(exc.message) from exc
     ticket: dict[str, Any] | None = next((t for t in tickets if t["issue_number"] == number), None)
@@ -202,10 +218,6 @@ def open_ticket(
         raise _fail(f"#{number} has no linked pull request yet.")
     if print_only or not webbrowser.open(url):
         out.print(url)
-
-
-if __name__ == "__main__":  # pragma: no cover
-    app()
 
 
 # ------------------------------------------------------------------ mcp
@@ -220,3 +232,8 @@ def mcp_command() -> None:
     from nextix_cli.mcp_server import serve
 
     serve()
+
+
+# Last, so every command above (mcp included) is registered when run as a script.
+if __name__ == "__main__":  # pragma: no cover
+    app()
