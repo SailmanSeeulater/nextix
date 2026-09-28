@@ -101,13 +101,24 @@ export const BeforeAfterPanel = memo(function BeforeAfterPanel({
           No screenshots were captured for this run.
         </p>
       ) : (
-        groups.map((g) => <RouteShots key={g.label} group={g} mode={mode} />)
+        groups.map((g) => (
+          <RouteShots key={g.label} group={g} mode={mode} baseline={baseline} />
+        ))
       )}
     </div>
   );
 });
 
-function RouteShots({ group, mode }: { group: ScreenshotGroup; mode: Mode }) {
+function RouteShots({
+  group,
+  mode,
+  baseline,
+}: {
+  group: ScreenshotGroup;
+  mode: Mode;
+  /** What the before shots show, from the runner; null on runs that didn't record it. */
+  baseline: string | null;
+}) {
   const titleId = useId();
   const size = formatSize(group.after ?? group.before);
   const diff = group.diff;
@@ -131,7 +142,12 @@ function RouteShots({ group, mode }: { group: ScreenshotGroup; mode: Mode }) {
       {group.before || group.after || group.diff ? (
         mode === "side" ? (
           <div className="shots-pair">
-            <ShotFigure shot={group.before} route={group.label} side="before" />
+            <ShotFigure
+              shot={group.before}
+              route={group.label}
+              side="before"
+              note={baseline ?? undefined}
+            />
             <ShotFigure shot={group.after} route={group.label} side="after" />
           </div>
         ) : mode === "slider" ? (
@@ -151,6 +167,7 @@ function RouteShots({ group, mode }: { group: ScreenshotGroup; mode: Mode }) {
 }
 
 const SIDE_TEXT = {
+  // Runs that predate `baseline` always compared with the default branch.
   before: { title: "Before", note: "default branch", missing: "No before screenshot" },
   after: { title: "After", note: "agent's branch", missing: "No after screenshot" },
   diff: { title: "Changed pixels", note: "highlighted", missing: "No diff image" },
@@ -164,10 +181,13 @@ function ShotFigure({
   shot,
   route,
   side,
+  note,
 }: {
   shot: Shot | null;
   route: string;
   side: "before" | "after" | "diff";
+  /** Replaces the side's default note (the before shot's baseline label). */
+  note?: string;
 }) {
   const text = SIDE_TEXT[side];
   return (
@@ -191,7 +211,7 @@ function ShotFigure({
       )}
       <figcaption>
         <span className="shot-caption">{text.title}</span>
-        <span className="shot-note">{text.note}</span>
+        <span className="shot-note">{note ?? text.note}</span>
       </figcaption>
     </figure>
   );

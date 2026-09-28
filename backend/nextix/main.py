@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from nextix import __version__
 from nextix.api import costs, health, internal, repos, review, runs, stream, tickets, webhooks
+from nextix.api.auth import configured_api_token
 from nextix.claude_auth import ClaudeAuth, describe_missing, resolve, scrub_competing_credentials
 from nextix.config import get_settings
 from nextix.db.session import get_async_engine
@@ -37,10 +38,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         removed = scrub_competing_credentials()
         if removed:
             log.info("subscription mode: removed %s from the environment", ", ".join(removed))
-    if settings.nextix_api_token.strip() in ("", "change-me"):
+    if configured_api_token(settings) is None:
         log.warning(
-            "NEXTIX_API_TOKEN is unset or the example value: anyone who can reach the API, "
-            "including agent sandboxes, can use it. Set a long random token in .env."
+            "NEXTIX_API_TOKEN is unset or still the example value 'change-me': the API is "
+            "LOCKED and answers 401 to every request that needs a token (the board and the "
+            "CLI can't sign in). Set a long random token in .env and restart."
         )
     app.state.triager = build_triager(settings)
     if app.state.claude_auth is ClaudeAuth.NONE:

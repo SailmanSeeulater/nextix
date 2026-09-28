@@ -36,6 +36,7 @@ import {
   heartbeatNeedsRecheck,
   indexCards,
   mergeHeartbeats,
+  parseBoardEvent,
   repoLabels,
   repoOptions,
   type CardIndex,
@@ -49,6 +50,7 @@ import {
   RERUN_QUESTION,
   boardCaughtUp,
   dropOutcome,
+  dropPending,
   passAction,
   pendingSettled,
   startPending,
@@ -141,6 +143,8 @@ export function Board({
   const [confirming, setConfirming] = useState<TicketCard | null>(null);
   const [notice, setNotice] = useState<{ text: string; tone: "info" | "error" } | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** runAction's catch-up checks; cleared on unmount. null once unmounted. */
+  const actionTimers = useRef<Set<ReturnType<typeof setTimeout>> | null>(new Set());
   /** A pointer drag ends with a click on whatever is under it; that click isn't a toggle. */
   const justDragged = useRef(false);
 
@@ -174,14 +178,12 @@ export function Board({
       const all = await loadTickets();
       if (all) setCards(indexCards(all));
     });
-    source.addEventListener("ticket.updated", (e) => {
-      const data = JSON.parse((e as MessageEvent<string>).data) as TicketCard;
-      enqueue({ type: "ticket.updated", data });
-    });
-    source.addEventListener("ticket.removed", (e) => {
-      const data = JSON.parse((e as MessageEvent<string>).data) as { id: string };
-      enqueue({ type: "ticket.removed", data });
-    });
+    for (const type of ["ticket.updated", "ticket.removed"] as const) {
+      source.addEventListener(type, (e) => {
+        const event = parseBoardEvent(type, (e as MessageEvent<string>).data);
+        if (event) enqueue(event);
+      });
+    }
     source.onerror = () => setConnection("offline"); // EventSource retries by itself
     return () => {
       if (timer) clearTimeout(timer);
@@ -225,8 +227,12 @@ export function Board({
 
   useEffect(() => {
     const timer = noticeTimer;
+    const timers = actionTimers;
+    timers.current ??= new Set(); // a dev remount after the cleanup below
     return () => {
       if (timer.current) clearTimeout(timer.current);
+      timers.current?.forEach(clearTimeout);
+      timers.current = null;
     };
   }, []);
 
@@ -238,18 +244,20 @@ export function Board({
       try {
         await (action === "retry" ? retryTicket(card.id) : rerunTicket(card.id));
         // Live events move the pass; if none arrive in time, re-read the whole board.
-        setTimeout(() => {
+        // Either way the entry has settled by then, so it goes.
+        const timers = actionTimers.current;
+        if (!timers) return; // unmounted while the request was out
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          setPending((p) => dropPending(p, card.id, started));
           if (boardCaughtUp(started, cardsRef.current[card.id])) return;
           void loadTickets().then((all) => {
             if (all) setCards(indexCards(all));
           });
         }, PENDING_TIMEOUT_MS + 500);
+        timers.add(timer);
       } catch (err) {
-        setPending((p) => {
-          const next = { ...p };
-          delete next[card.id];
-          return next;
-        });
+        setPending((p) => dropPending(p, card.id, started));
         const why = err instanceof ApiError ? err.message : "Something went wrong. Try again.";
         say(`#${card.issue_number}: ${why}`, "error");
       }

@@ -9,6 +9,7 @@ known meta keys with the right types are kept.
 
 import json
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,6 +66,9 @@ def _clean_meta(kind: str, meta: Any) -> dict[str, Any]:
         value = meta.get(key)
         # bool is an int in Python; only accept it where a bool is expected.
         if isinstance(value, bool) and bool not in types:
+            continue
+        # json.loads accepts NaN and Infinity, which Postgres JSONB rejects.
+        if isinstance(value, float) and not math.isfinite(value):
             continue
         if isinstance(value, types):
             kept[key] = redact(value)[:MAX_META_TEXT] if isinstance(value, str) else value

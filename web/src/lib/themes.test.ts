@@ -4,7 +4,7 @@
  * mixes globals.css uses, so a failing theme fails here before it ships.
  */
 import { describe, expect, it } from "vitest";
-import { THEMES, findTheme, themeBootScript, themeCss, type Theme } from "./themes";
+import { THEMES, THEME_COLLECTIONS, findTheme, themeBootScript, themeCss, type Theme } from "./themes";
 
 type RGB = [number, number, number];
 
@@ -47,7 +47,8 @@ function passes(theme: Theme): Record<string, { fill: RGB; ink: RGB }> {
 
 const AA = 4.5;
 
-describe.each(THEMES.map((t) => [t.name, t] as const))("%s", (_name, theme) => {
+// Labeled by name and id: two collections may share a display name.
+describe.each(THEMES.map((t) => [`${t.name} (${t.id})`, t] as const))("%s", (_name, theme) => {
   const t = theme.tokens;
 
   it("keeps pass titles and labels (94% mix) readable on every pass color", () => {
@@ -138,7 +139,30 @@ describe("theme plumbing", () => {
 
   it("finds themes by id and rejects unknown ids", () => {
     expect(findTheme("espresso")?.name).toBe("Espresso & Cream");
+    expect(findTheme("latte")?.name).toBe("Espresso & Latte");
     expect(findTheme("nope")).toBeUndefined();
+  });
+
+  it("gives every theme a unique id", () => {
+    const ids = THEMES.map((t) => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("files every theme in a known collection: KeyUp's 15 and the portfolio's 21", () => {
+    const known = new Set(THEME_COLLECTIONS.map((c) => c.id));
+    for (const theme of THEMES) expect(known.has(theme.collection), theme.id).toBe(true);
+    expect(THEMES.filter((t) => t.collection === "nextix")).toHaveLength(15);
+    expect(THEMES.filter((t) => t.collection === "portfolio")).toHaveLength(21);
+  });
+
+  it("keeps each theme to the 16 base tokens, all hex except the shadow", () => {
+    for (const theme of THEMES) {
+      const keys = Object.keys(theme.tokens);
+      expect(keys, theme.id).toHaveLength(16);
+      for (const [k, v] of Object.entries(theme.tokens)) {
+        if (k !== "shadow") expect(v, `${theme.id}.${k}`).toMatch(/^#[0-9a-f]{6}$/);
+      }
+    }
   });
 });
 

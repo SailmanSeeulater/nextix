@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # Sandboxes join this Docker network so they can reach the API for callbacks.
     agent_network: str = "nextix_agents"
     agent_callback_base: str = "http://api:8000"
+    # The egress allowlist proxy (egress/squid.conf) the sandboxes must use, since their
+    # network has no route out. Empty: no proxy variables are passed.
+    agent_proxy_url: str = ""
     agent_mem_limit: str = "4g"
     agent_cpus: float = 2.0
     agent_pids_limit: int = 512

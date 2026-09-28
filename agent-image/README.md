@@ -34,8 +34,9 @@ docker run --rm --entrypoint id nextix-agent:latest                 # uid=1000(a
 ## How the worker runs it
 
 `uid 1000`, `cap_drop=ALL`, `no-new-privileges`, `mem_limit=4g`, `nano_cpus=2e9`,
-`pids_limit=512`, no volumes, no Docker socket, on the compose network (to reach
-`http://api:8000`), label `nextix.run_id=<uuid>`, and `init=True` (Docker's tiny init
+`pids_limit=512`, no volumes, no Docker socket, on the compose network `nextix_agents`
+(to reach `http://api:8000`; it is `internal`, so the internet only through the `egress`
+allowlist proxy, `egress/squid.conf`), label `nextix.run_id=<uuid>`, and `init=True` (Docker's tiny init
 reaps the processes the agent orphans; the runner also relies on it, see below).
 
 Chromium runs without its own sandbox (`chromium_sandbox=False`): it needs privileges the
@@ -51,7 +52,10 @@ and Chromium plus a Next.js dev server (Turbopack), npm, and the runner at 134 (
 `NEXTIX_ISSUE_NUMBER`, `NEXTIX_TASK_JSON` (`{"title", "body", "extra_instructions",
 "review_comments": []}`), `NEXTIX_MODEL`, `NEXTIX_MAX_TURNS`, `NEXTIX_TIMEOUT_MIN`,
 `NEXTIX_MAX_COST_USD`, `NEXTIX_ALLOWED_TOOLS` (comma-separated), `GITHUB_TOKEN` (read-only,
-clone only), exactly one of `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`, and
+clone only), exactly one of `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`, when
+`AGENT_PROXY_URL` is set the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY` and their
+lowercase forms, `NO_PROXY`/`no_proxy` for loopback and the API, `JAVA_TOOL_OPTIONS` for
+Gradle and other JVM tools, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`), and
 `NEXTIX_CONFIG_JSON`: the repo's validated `.nextix.yml` sections,
 
 ```json
@@ -101,7 +105,9 @@ installs its browsers under `$HOME`) and `NEXTIX_SANDBOX=1` (see "Leftover proce
      that the agent did not touch afterwards (installed files, generated files, a
      rewritten lockfile). If the branch is ahead of its base, a self-contained bundle of
      it is written, unless those commits contain one of the run's own credentials: then
-     the run fails with `secret_in_changes` and nothing is bundled.
+     the run fails with `secret_in_changes` and nothing is bundled. The scan reads every
+     commit's full object and patch, binary files and merges included (replace refs and
+     grafts ignored), and also matches each credential's base64 encoding.
 7. **Checks** (only when the agent succeeded with commits):
    - `setup` again if the agent's commit touched `package.json`, `package-lock.json`,
      `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `requirements*.txt`,

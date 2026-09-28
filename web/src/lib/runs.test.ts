@@ -357,6 +357,10 @@ describe("words", () => {
   it("words exit reasons, de-snaking unknown ones", () => {
     expect(exitReasonWord("no_changes")).toBe("No changes to commit");
     expect(exitReasonWord("docker_oom_killed")).toBe("Docker oom killed");
+    expect(exitReasonWord("bundle_too_large")).toBe("Changes too large");
+    expect(exitReasonWord("publish_failed")).toBe("Couldn't publish");
+    expect(exitReasonWord("pr_failed")).toBe("Couldn't open the PR");
+    expect(exitReasonWord("github_error")).toBe("GitHub error");
   });
 
   it("labels attempts for the selector", () => {

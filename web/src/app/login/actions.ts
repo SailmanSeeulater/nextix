@@ -2,7 +2,16 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { SESSION_COOKIE, SESSION_MAX_AGE_S, safeEqual, sessionValue } from "@/lib/session";
+import {
+  SESSION_COOKIE,
+  SESSION_MAX_AGE_S,
+  configuredToken,
+  safeEqual,
+  sessionValue,
+} from "@/lib/session";
+
+/** A wrong token waits this long before the answer, to slow guessing. */
+const FAILED_LOGIN_DELAY_MS = 400;
 
 function safeNext(value: FormDataEntryValue | null): string {
   const next = typeof value === "string" ? value : "/";
@@ -11,10 +20,14 @@ function safeNext(value: FormDataEntryValue | null): string {
 }
 
 export async function login(formData: FormData): Promise<void> {
-  const expected = process.env.NEXTIX_API_TOKEN;
+  const expected = configuredToken();
   const submitted = formData.get("token");
   const next = safeNext(formData.get("next"));
-  if (!expected || typeof submitted !== "string" || !safeEqual(submitted, expected)) {
+  if (!expected) {
+    redirect(`/login?error=config&next=${encodeURIComponent(next)}`);
+  }
+  if (typeof submitted !== "string" || !safeEqual(submitted, expected)) {
+    await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
     redirect(`/login?error=1&next=${encodeURIComponent(next)}`);
   }
   (await cookies()).set(SESSION_COOKIE, await sessionValue(expected), {

@@ -200,6 +200,25 @@ async def test_transcript_events_are_redacted_truncated_and_published(
     assert f"nextix:run:{run.id}" in channels
 
 
+async def test_non_finite_and_runaway_usage_never_breaks_a_batch(
+    client: httpx.AsyncClient, session: AsyncSession
+) -> None:
+    # Python's json writes NaN/Infinity; Postgres rejects them in numeric and JSONB columns.
+    run = await make_run(session, await make_ticket(session), status="running")
+    events = [
+        {"kind": "usage", "payload": {"input_tokens": 10, "output_tokens": 2, "cost_usd": 0.2}},
+        {"kind": "usage", "payload": {"input_tokens": True, "cost_usd": float("nan")}},
+        {"kind": "usage", "payload": {"input_tokens": 10**12, "cost_usd": float("inf")}},
+        {"kind": "log", "payload": {"text": "ok", "ratio": float("nan")}},
+    ]
+    r = await callback(client, run.id, events)
+    assert r.status_code == 202
+    await session.refresh(run)
+    assert (run.input_tokens, float(run.cost_usd)) == (2**31 - 1, 0.2)
+    rows = (await session.scalars(select(RunEvent).order_by(RunEvent.id))).all()
+    assert rows[-1].payload == {"text": "ok", "ratio": None}
+
+
 async def test_oversized_batches_are_refused(
     client: httpx.AsyncClient, session: AsyncSession
 ) -> None:

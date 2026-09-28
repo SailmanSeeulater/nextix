@@ -5,6 +5,8 @@ x-backend-env: &backend-env
   environment:
     DATABASE_URL: postgresql+psycopg://nextix:nextix@postgres:5432/nextix
     REDIS_URL: redis://redis:6379/0
+    # Sandboxes reach the internet only through this proxy (see `egress` below).
+    AGENT_PROXY_URL: http://egress:3128
 
 services:
   postgres:
@@ -41,7 +43,7 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     # `agents` is the sandboxes' network: they can reach the API (for callbacks) and the
-    # internet, but not Postgres or Redis, which are only on `default`.
+    # egress proxy, but not Postgres or Redis, which are only on `default`.
     networks: [default, agents]
     volumes:
       - ./backend:/app
@@ -89,6 +91,20 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      # Sandboxes can reach nothing outside `agents` without the proxy.
+      egress:
+        condition: service_started
+
+  # The sandboxes' only way out: an allowlist proxy (egress/squid.conf). It sits on both
+  # networks; the sandboxes are only on `agents`, which has no route to the internet.
+  egress:
+    # Pinned: the allowlist config is checked against this version (CI runs `squid -k parse`).
+    # Same image `latest` pointed to when pinned.
+    image: ubuntu/squid:6.6-24.04_beta
+    volumes:
+      - ./egress/squid.conf:/etc/squid/squid.conf:ro
+    networks: [default, agents]
+    restart: unless-stopped
 
   # The agent sandbox image. Not a long-running service: build it with
   #   docker compose build agent
@@ -110,14 +126,15 @@ services:
 
   # Webhook relay: forwards GitHub's events from the smee.io channel (SMEE_URL, the GitHub
   # App's webhook URL) to the API, so it runs whenever the stack does. Without SMEE_URL it
-  # just says so and idles.
+  # just says so and idles. smee-client is pinned: `npx` would otherwise run whatever was
+  # published last.
   smee:
     image: node:22-alpine
     environment:
       SMEE_URL: ${SMEE_URL:-}
     command: >
       sh -c 'if [ -z "$$SMEE_URL" ]; then echo "SMEE_URL is not set in .env: GitHub webhooks are not forwarded"; exec sleep infinity; fi;
-             exec npx --yes smee-client@latest --url "$$SMEE_URL" --target http://api:8000/api/github/webhook'
+             exec npx --yes smee-client@5.0.0 --url "$$SMEE_URL" --target http://api:8000/api/github/webhook'
     restart: unless-stopped
     depends_on:
       api:
@@ -145,6 +162,7 @@ services:
 networks:
   agents:
     name: nextix_agents
+    internal: true  # no direct route out: sandboxes go through `egress`
 
 volumes:
   pgdata:

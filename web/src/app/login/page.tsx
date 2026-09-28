@@ -30,7 +30,9 @@ export default async function LoginPage({
         <input type="hidden" name="next" value={next ?? "/"} />
         {error ? (
           <p className="signin-error" id="signin-error" role="alert">
-            That token doesn&apos;t match. Check NEXTIX_API_TOKEN in your .env file.
+            {error === "config"
+              ? "Sign-in isn't configured: set NEXTIX_API_TOKEN in your .env file to a value other than change-me."
+              : "That token doesn't match. Check NEXTIX_API_TOKEN in your .env file."}
           </p>
         ) : null}
         <div className="signin-actions">

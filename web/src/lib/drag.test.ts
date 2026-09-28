@@ -6,6 +6,7 @@ import {
   RERUN_QUESTION,
   boardCaughtUp,
   dropOutcome,
+  dropPending,
   passAction,
   pendingSettled,
   startPending,
@@ -126,6 +127,19 @@ describe("pending actions", () => {
     const pending = startPending(card("failed"), "retry", T0);
     expect(pendingSettled(pending, card("failed"), T0 + PENDING_TIMEOUT_MS)).toBe(false);
     expect(pendingSettled(pending, card("failed"), T0 + PENDING_TIMEOUT_MS + 1)).toBe(true);
+  });
+
+  it("drops only the entry that is still the one started", () => {
+    const first = startPending(card("failed"), "retry", T0);
+    const other = startPending(card("in_review"), "rerun", T0);
+    const all = { a: first, b: other };
+    expect(dropPending(all, "a", first)).toEqual({ b: other });
+    expect(all).toEqual({ a: first, b: other });
+    // A newer action on the same pass replaced it: keep the newer one.
+    const newer = startPending(card("failed"), "retry", T0 + 5);
+    const replaced = { a: newer };
+    expect(dropPending(replaced, "a", first)).toBe(replaced);
+    expect(dropPending(all, "missing", first)).toBe(all);
   });
 });
 

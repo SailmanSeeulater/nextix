@@ -10,13 +10,13 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import Subquery, exists, func, select, update
+from sqlalchemy import Subquery, delete, exists, func, select, update
 from sqlalchemy.dialects.postgresql import distinct_on, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from nextix.config import get_settings
-from nextix.db.models import Repo, Run, Ticket
+from nextix.db.models import CheckRun, CommitStatus, Repo, Run, Ticket
 from nextix.github.schemas import GhIssue, GhPullRequest, GhRepository
 from nextix.runs.state import ACTIVE_STATUSES, FAILED_STATUSES, RunStatus
 from nextix.tickets.schemas import Column, RunSummary, TicketCard
@@ -118,16 +118,26 @@ async def upsert_repo(
 
 
 async def get_repo(session: AsyncSession, owner: str, name: str) -> Repo | None:
-    return await session.scalar(select(Repo).where(Repo.owner == owner, Repo.name == name))
+    """GitHub owner and repo names are case-insensitive, so the lookup is too."""
+    return await session.scalar(
+        select(Repo).where(
+            func.lower(Repo.owner) == owner.lower(), func.lower(Repo.name) == name.lower()
+        )
+    )
 
 
 async def set_repos_enabled(
     session: AsyncSession, *, enabled: bool, installation_id: int, full_names: Sequence[str] = ()
 ) -> None:
-    """Enable/disable repos of an installation (all of them, or only ``full_names``)."""
+    """Enable/disable repos of an installation (all of them, or only ``full_names``).
+
+    Full names match case-insensitively, like GitHub (and ``retire_repos``).
+    """
     stmt = update(Repo).where(Repo.installation_id == installation_id)
     if full_names:
-        stmt = stmt.where((Repo.owner + "/" + Repo.name).in_(list(full_names)))
+        stmt = stmt.where(
+            func.lower(Repo.owner + "/" + Repo.name).in_([n.lower() for n in full_names])
+        )
     await session.execute(stmt.values(enabled=enabled))
 
 
@@ -147,7 +157,9 @@ async def retire_repos(
     """Retire an installation's repos except ``keep`` (full names, case-insensitive).
 
     Repos with tickets are disabled so their history survives. Repos that never had
-    a ticket are deleted outright, since nothing about them is worth keeping.
+    a ticket are deleted outright, since nothing about them is worth keeping, along with
+    the CI results mirrored for them (check_runs / commit_statuses reference the repo
+    without a cascade, so the delete would otherwise fail on every redelivery).
     """
     keep_lower = {name.lower() for name in keep}
     result = RepoReconcileResult()
@@ -160,6 +172,8 @@ async def retire_repos(
             repo.enabled = False
             result.disabled += 1
         else:
+            await session.execute(delete(CheckRun).where(CheckRun.repo_id == repo.id))
+            await session.execute(delete(CommitStatus).where(CommitStatus.repo_id == repo.id))
             await session.delete(repo)
             result.deleted += 1
     await session.flush()
@@ -345,7 +359,9 @@ async def list_board(
     )
     if repo:
         owner, _, name = repo.partition("/")
-        stmt = stmt.where(Repo.owner == owner, Repo.name == name)
+        stmt = stmt.where(
+            func.lower(Repo.owner) == owner.lower(), func.lower(Repo.name) == name.lower()
+        )
     cards = [_card(t, r, run) for t, r, run in (await session.execute(stmt)).all()]
     if column is not None:
         cards = [c for c in cards if c.column == column]

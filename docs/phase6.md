@@ -18,8 +18,11 @@ Temporal. The owner asked for phases to continue without check-ins (2026-09-26).
    first served per repo: a run only starts if no older queued run for the same repo is
    waiting. The board keeps showing "Waiting for a worker".
 3. **Sandboxes are owned by the worker that started them.** Containers get a
-   `nextix.worker=<hostname>` label and each worker only sweeps its own, so the Phase 3
-   orphan sweep stays correct with more than one run at a time.
+   `nextix.owner=<host>/<boot id>:<pid>` label (the runner container's hostname, an id
+   generated when that worker booted, and the process watching the sandbox). Each runner
+   only sweeps sandboxes with its own hostname, and among those only the ones whose
+   process is gone (a previous boot, or a dead process), so the Phase 3 orphan sweep
+   stays correct with more than one run at a time.
 4. **Costs come from runs.** `GET /api/costs?days=30` returns totals and breakdowns by
    day, repo, and ticket (cost, input and output tokens, run count), computed from
    `runs` (the only place costs live). On a Claude plan the figures are Claude Code's

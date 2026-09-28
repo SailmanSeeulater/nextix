@@ -54,6 +54,9 @@ export function CostsView() {
 
   function choose(next: CostWindow) {
     if (next === days) return;
+    // Native replaceState integrates with the App Router and updates useSearchParams, so
+    // `days` follows without a navigation (node_modules/next/dist/docs/01-app/
+    // 01-getting-started/04-linking-and-navigating.md, "Native History API").
     try {
       window.history.replaceState(null, "", costsHref(next));
     } catch {

@@ -28,6 +28,24 @@ export function indexCards(cards: TicketCard[]): CardIndex {
   return Object.fromEntries(cards.map((c) => [c.id, c]));
 }
 
+/**
+ * One board stream message as an event, or null when its data isn't a JSON object with
+ * a string id: a malformed message is dropped rather than thrown inside the listener.
+ */
+export function parseBoardEvent(type: BoardEvent["type"], data: string): BoardEvent | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null) return null;
+  if (typeof (value as { id?: unknown }).id !== "string") return null;
+  return type === "ticket.updated"
+    ? { type, data: value as TicketCard }
+    : { type, data: value as { id: string } };
+}
+
 /** Apply one live event. Returns a new index; never mutates the input. */
 export function applyEvent(index: CardIndex, event: BoardEvent): CardIndex {
   if (event.type === "ticket.updated") {

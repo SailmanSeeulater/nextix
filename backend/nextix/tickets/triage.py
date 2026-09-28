@@ -27,6 +27,9 @@ from pydantic import ValidationError
 
 from nextix.claude_auth import ClaudeAuth, resolve
 from nextix.config import Settings
+
+# The one shared scrubber (Anthropic and GitHub tokens, URL credentials); re-exported.
+from nextix.redact import redact
 from nextix.tickets.prompts import (
     TRIAGE_OUTPUT_SCHEMA,
     TRIAGE_SYSTEM_PROMPT,
@@ -60,9 +63,6 @@ def defuse_mentions(text: str) -> str:
 FULLWIDTH_AT = "\N{FULLWIDTH COMMERCIAL AT}"
 
 
-_SECRET = re.compile(r"sk-ant-[A-Za-z0-9_\-]+")
-
-
 class TriageError(RuntimeError):
     """Triage could not produce a usable issue."""
 
@@ -87,11 +87,6 @@ def validate_triage_output(data: object) -> TriageResult:
         return TriageResult.model_validate(data)
     except ValidationError as exc:
         raise TriageError(f"model output failed validation: {exc.error_count()} errors") from exc
-
-
-def redact(text: str) -> str:
-    """Remove anything shaped like an Anthropic credential before it reaches a log or user."""
-    return _SECRET.sub("sk-ant-…", text)
 
 
 class _Malformed(TriageError):

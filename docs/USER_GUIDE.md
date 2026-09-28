@@ -419,10 +419,15 @@ transcript, and `docker compose logs runner`.
   and only ever to `nextix/issue-N`, never forced, never to `main`. Merging is always yours.
 - **It can't reach nexTix's database or Redis**; sandboxes are on their own network,
   and compose doesn't publish those two on your machine.
-- **It can reach the internet, and other ports published on your machine.** On Docker
-  Desktop any container can reach services you publish on your computer (for example
-  another project's database on port 5433). Don't leave sensitive, password-less
-  services published while agents run.
+- **It can reach only an allowlist of sites.** The sandboxes' network has no route out;
+  their one way to the internet is the `egress` proxy, which allows GitHub, the
+  Anthropic API, and the npm, PyPI, Maven, and Gradle registries (`egress/squid.conf`).
+  If a run fails because a setup command can't download something,
+  `docker compose exec egress tail -n 50 /var/log/squid/access.log` shows the refused
+  host (`TCP_DENIED`); add it to `egress/squid.conf` and
+  `docker compose restart egress`. Add hosts only when a run actually needs them.
+  The same isolation keeps it away from ports published on your machine (another
+  project's database, say), which containers can otherwise reach on Docker Desktop.
 - **Secrets are scrubbed**: tokens that appear in the transcript or comments are replaced
   with `[redacted]`.
 - **Issue text is treated as a task, not as orders.** The agent is told the rules can't be

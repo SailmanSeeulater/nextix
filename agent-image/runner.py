@@ -251,27 +251,55 @@ _TOKEN_PATTERN = re.compile(
 TRUNCATION_NOTE = "\n[... truncated by nexTix]"
 
 
+def base64_forms(secret: str) -> set[str]:
+    """What base64 of ``secret`` always contains, wherever it sits in the encoded data.
+
+    Base64 encodes 3 bytes as 4 characters, so the encoding of the secret depends on its
+    offset (mod 3) in the input, and the groups it shares with its neighbours at either
+    end depend on them. For each of the 3 offsets this keeps only the groups made of the
+    secret's own bytes: a substring of the padded form, the unpadded form, and any larger
+    blob it was encoded inside. The URL-safe alphabet is included too.
+    """
+    raw = secret.encode("utf-8")
+    forms: set[str] = set()
+    for shift in range(3):
+        encoded = base64.b64encode(b"\x00" * shift + raw).decode("ascii")
+        # Drop the first group if it holds a padding byte, and a trailing partial group.
+        core = encoded[4 if shift else 0 : (shift + len(raw)) // 3 * 4]
+        forms.add(core)
+        forms.add(core.translate(str.maketrans("+/", "-_")))
+    # Never let a short core stand in for the secret: it could match unrelated text.
+    return {form for form in forms if len(form) >= 8}
+
+
 class Redactor:
-    """Masks the run's own secrets and anything shaped like a token."""
+    """Masks the run's own secrets (also base64-encoded) and anything shaped like a token."""
 
     def __init__(self, secrets: Iterable[str] = ()) -> None:
         # Longest first, so a secret that contains another is masked whole.
         unique = {s.strip() for s in secrets if len(s.strip()) >= 8}
         self._secrets = sorted(unique, key=len, reverse=True)
+        # Base64 is the one-liner an agent would reach for to slip a secret past an exact
+        # match. The forms are masked in output as well: they only occur where something
+        # really encoded the secret (e.g. a basic-auth header), so this costs no noise.
+        encoded = {form for s in unique for form in base64_forms(s)}
+        self._encoded = sorted(encoded, key=len, reverse=True)
 
     def text(self, value: str) -> str:
         # NUL can't be stored by the API (Postgres JSONB); drop it here too.
         value = value.replace("\x00", "")
-        for secret in self._secrets:
+        for secret in (*self._secrets, *self._encoded):
             value = value.replace(secret, REDACTED)
         return _TOKEN_PATTERN.sub(REDACTED, value)
 
     def has_secret(self, value: str) -> bool:
-        """True if ``value`` holds one of the run's own secrets (exact values only).
+        """True if ``value`` holds one of the run's own secrets, as is or base64-encoded.
 
         Token *shapes* are not checked: repos legitimately contain fake example tokens.
+        ``value`` may hold NULs and U+FFFD from undecodable bytes; neither is ever part of
+        a secret, so a secret's own characters still match around them.
         """
-        return any(secret in value for secret in self._secrets)
+        return any(secret in value for secret in (*self._secrets, *self._encoded))
 
     def value(self, obj: Any) -> Any:
         """Redact every string inside a JSON-like value."""
@@ -1939,22 +1967,35 @@ async def outgoing_changes(git: GitRunner, repo: Path, *, base_ref: str, branch:
     """Every message and patch the bundle adds on top of ``base_ref``, commit by commit.
 
     Per commit (not one overall diff), so something added and then removed still shows.
-    Binary files are skipped; external diff and textconv drivers and the signature
-    program (all of which the repo's config could name) are never run.
+    External diff and textconv drivers and the signature program (all of which the repo's
+    config could name) are never run. The rest is about showing what the bundle really
+    holds, since the agent controls the repo:
+
+    - ``--text``: binary files, and files .gitattributes marks ``-diff`` or ``binary``,
+      as their bytes rather than "Binary files differ";
+    - ``--format=raw``: the whole commit object (author, committer, any extra header),
+      not just the message;
+    - ``--diff-merges=first-parent``: a merge's own changes, which plain ``--patch``
+      leaves out;
+    - replace refs and a graft file are ignored: they would make log show other commits
+      than the ones ``git bundle`` packs.
     """
     return await git_ok(
         git,
         [
             "log",
             "--patch",
+            "--text",
             "--no-ext-diff",
             "--no-textconv",
             "--no-show-signature",
             "--no-color",
-            "--format=%B",
+            "--diff-merges=first-parent",
+            "--format=raw",
             f"{base_ref}..refs/heads/{branch}",
         ],
         cwd=repo,
+        env={"GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": "/dev/null"},
     )
 
 
@@ -3014,7 +3055,7 @@ class Runner:
         """The baseline, in a worktree the agent never sees: setup, app, capture.
 
         The baseline is the default branch on a ticket's first run, and the PR branch as it
-        stood on later runs (see ``_prepare``).
+        stood on later runs (see ``_set_up_repo``).
         """
         base = self.base_dir
         ref = self._before_ref or f"refs/remotes/origin/{self.cfg.default_branch}"

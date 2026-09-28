@@ -4,10 +4,13 @@ All calls authenticate as an installation except ``get_repo_installation``,
 which uses the app JWT to discover which installation covers a repo.
 """
 
+import asyncio
 import base64
 import binascii
+import logging
 import re
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -34,12 +37,48 @@ class DiffTooLarge(Exception):
 
 _NEXT_LINK = re.compile(r'<([^>]+)>;\s*rel="next"')
 
+log = logging.getLogger(__name__)
+
+# The longest a request waits out a rate limit before its one retry. Longer limits (the
+# primary limit resets hourly) fail fast instead of holding a webhook or a worker.
+MAX_RATE_LIMIT_WAIT_S = 30.0
+# A 429 / secondary limit with no retry-after or reset header: GitHub says to wait "at
+# least one minute"; capped like any other wait.
+DEFAULT_RATE_LIMIT_WAIT_S = MAX_RATE_LIMIT_WAIT_S
+
+
+def rate_limit_wait(resp: httpx.Response, *, now: float) -> float | None:
+    """Seconds to wait before retrying a rate-limited response, or None if it isn't one.
+
+    Rate limits are a 429, or a 403 carrying ``retry-after`` or
+    ``x-ratelimit-remaining: 0`` (a plain 403 is a permissions error, not worth retrying).
+    """
+    retry_after = resp.headers.get("retry-after")
+    exhausted = resp.headers.get("x-ratelimit-remaining") == "0"
+    if resp.status_code != 429 and not (
+        resp.status_code == 403 and (retry_after is not None or exhausted)
+    ):
+        return None
+    wait = DEFAULT_RATE_LIMIT_WAIT_S
+    reset = resp.headers.get("x-ratelimit-reset")
+    try:
+        if retry_after is not None:
+            wait = float(retry_after)
+        elif reset is not None:
+            wait = float(reset) - now
+    except ValueError:
+        pass
+    return min(max(wait, 0.0), MAX_RATE_LIMIT_WAIT_S)
+
 
 class GitHubClient:
     def __init__(self, auth: GitHubAppAuth, http: httpx.AsyncClient, api_url: str) -> None:
         self._auth = auth
         self._http = http
         self._api_url = api_url.rstrip("/")
+        # Swappable so tests don't actually wait out a rate limit.
+        self._sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+        self._clock: Callable[[], float] = time.time
 
     @property
     def auth(self) -> GitHubAppAuth:
@@ -53,34 +92,65 @@ class GitHubClient:
             "X-GitHub-Api-Version": self._auth.api_version,
         }
 
+    async def _request(
+        self,
+        method: str,
+        installation_id: int,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> httpx.Response:
+        """One installation-authenticated call, retried at most once per failure kind.
+
+        - 401: the cached token was revoked or expired early (e.g. the installation was
+          suspended and unsuspended); mint a new one and try again.
+        - Rate limited: wait out ``retry-after`` / the reset time (capped) and try again.
+
+        Anything still failing is returned as is, for the caller's ``raise_for_status``.
+        """
+        retried_auth = retried_limit = False
+        while True:
+            resp = await self._http.request(
+                method,
+                url,
+                headers=await self._headers(installation_id),
+                params=params,
+                json=json,
+            )
+            if resp.status_code == 401 and not retried_auth:
+                retried_auth = True
+                log.info("GitHub said 401 for installation %s: new token", installation_id)
+                self._auth.invalidate(installation_id)
+                continue
+            wait = rate_limit_wait(resp, now=self._clock())
+            if wait is not None and not retried_limit:
+                retried_limit = True
+                log.warning("GitHub rate limit on %s %s: retrying in %.0f s", method, url, wait)
+                await self._sleep(wait)
+                continue
+            return resp
+
     async def _get(
         self, installation_id: int, path: str, params: dict[str, Any] | None = None
     ) -> Any:
         url = path if path.startswith("http") else f"{self._api_url}{path}"
-        resp = await self._http.get(
-            url, headers=await self._headers(installation_id), params=params
-        )
+        resp = await self._request("GET", installation_id, url, params=params)
         resp.raise_for_status()
         return resp.json()
 
     async def _post(self, installation_id: int, path: str, body: dict[str, Any]) -> Any:
-        resp = await self._http.post(
-            f"{self._api_url}{path}", headers=await self._headers(installation_id), json=body
-        )
+        resp = await self._request("POST", installation_id, f"{self._api_url}{path}", json=body)
         resp.raise_for_status()
         return resp.json()
 
     async def _patch(self, installation_id: int, path: str, body: dict[str, Any]) -> Any:
-        resp = await self._http.patch(
-            f"{self._api_url}{path}", headers=await self._headers(installation_id), json=body
-        )
+        resp = await self._request("PATCH", installation_id, f"{self._api_url}{path}", json=body)
         resp.raise_for_status()
         return resp.json()
 
     async def _delete(self, installation_id: int, path: str) -> None:
-        resp = await self._http.delete(
-            f"{self._api_url}{path}", headers=await self._headers(installation_id)
-        )
+        resp = await self._request("DELETE", installation_id, f"{self._api_url}{path}")
         if resp.status_code not in (200, 204, 404):
             resp.raise_for_status()
 
@@ -96,9 +166,7 @@ class GitHubClient:
         url: str | None = f"{self._api_url}{path}"
         query: dict[str, Any] | None = {**params, "per_page": 100}
         while url:
-            resp = await self._http.get(
-                url, headers=await self._headers(installation_id), params=query
-            )
+            resp = await self._request("GET", installation_id, url, params=query)
             resp.raise_for_status()
             body = resp.json()
             for item in body[items_key] if items_key else body:

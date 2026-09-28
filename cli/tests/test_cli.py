@@ -1,6 +1,10 @@
 """CLI behavior against a mocked API. No network, config in a temp dir."""
 
 import json
+import os
+import stat
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -11,6 +15,7 @@ import respx
 from typer.testing import CliRunner
 
 from nextix_cli import config
+from nextix_cli import main as main_module
 from nextix_cli.main import app
 
 API = "http://nextix.test"
@@ -57,7 +62,7 @@ def api() -> Iterator[respx.MockRouter]:
 
 
 def test_login_verifies_and_saves(api: respx.MockRouter, isolated_config: Path) -> None:
-    route = api.get("/api/tickets").respond(200, json=[])
+    route = api.get("/api/repos").respond(200, json=[])
     result = runner.invoke(
         app, ["login", "--api-url", API, "--repo", "acme/widgets"], input="s3cret-value\n"
     )
@@ -69,7 +74,7 @@ def test_login_verifies_and_saves(api: respx.MockRouter, isolated_config: Path) 
 
 
 def test_login_rejects_bad_token(api: respx.MockRouter, isolated_config: Path) -> None:
-    api.get("/api/tickets").respond(401, json={"detail": "invalid"})
+    api.get("/api/repos").respond(401, json={"detail": "invalid"})
     result = runner.invoke(app, ["login", "--api-url", API, "--repo", ""], input="bad\n")
     assert result.exit_code == 1
     assert "rejected your token" in result.output
@@ -192,6 +197,21 @@ def test_ls_lists_by_column(api: respx.MockRouter) -> None:
 
 
 @pytest.mark.usefixtures("signed_in")
+def test_ls_shows_unknown_columns_last(api: respx.MockRouter) -> None:
+    api.get("/api/tickets").respond(
+        200,
+        json=[
+            {**CARD, "issue_number": 9, "title": "Parked", "column": "on_hold"},
+            {**CARD, "column": "done"},
+        ],
+    )
+    result = runner.invoke(app, ["ls"])
+    assert result.exit_code == 0, result.output
+    assert result.output.index("Done") < result.output.index("on_hold")
+    assert "Parked" in result.output
+
+
+@pytest.mark.usefixtures("signed_in")
 def test_open_prints_issue_url(api: respx.MockRouter) -> None:
     api.get("/api/tickets").respond(200, json=[CARD])
     result = runner.invoke(app, ["open", "7", "--print"])
@@ -212,3 +232,44 @@ def test_env_overrides_file(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NEXTIX_API_TOKEN", "env-tok")
     cfg = config.load()
     assert (cfg.api_url, cfg.token) == ("http://env", "env-tok")
+
+
+def test_config_file_is_private_from_creation(monkeypatch: pytest.MonkeyPatch) -> None:
+    modes: list[int] = []
+    real_open = os.open
+
+    def spy(path: Any, flags: int, mode: int = 0o777, *args: Any, **kwargs: Any) -> int:
+        modes.append(mode)
+        return real_open(path, flags, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", spy)
+    config.save(config.CliConfig(api_url=API, token="tok"))
+    assert modes == [0o600]
+    if os.name == "posix":
+        assert stat.S_IMODE(config.config_path().stat().st_mode) == 0o600
+    # Saving again truncates rather than appending.
+    config.save(config.CliConfig(api_url=API, token="tok2"))
+    assert config.load().token == "tok2"
+
+
+def test_malformed_config_is_a_friendly_error() -> None:
+    config.config_path().write_text('token = "unterminated\n', encoding="utf-8")
+    result = runner.invoke(app, ["ls"])
+    assert result.exit_code == 1
+    assert "config.toml" in result.output and "isn't valid TOML" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_mcp_command_is_registered_when_run_as_a_script() -> None:
+    # The __main__ guard must come after every command, or `python main.py mcp` fails.
+    main_py = Path(main_module.__file__ or "")
+    proc = subprocess.run(
+        [sys.executable, str(main_py), "mcp", "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONUTF8": "1"},
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "MCP server" in proc.stdout

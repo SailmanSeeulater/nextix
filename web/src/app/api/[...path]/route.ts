@@ -5,11 +5,10 @@
  */
 import type { NextRequest } from "next/server";
 import { apiBaseUrl, authHeaders } from "@/lib/api";
+import { upstreamUrl } from "@/lib/proxy-path";
 
 export const dynamic = "force-dynamic";
 
-// Never reachable from the browser: GitHub and sandboxes call the API directly.
-const BLOCKED_PREFIXES = ["github/", "internal/"];
 const FORWARD_REQUEST_HEADERS = ["accept", "content-type", "last-event-id"];
 // nosniff keeps the browser from reading a stored test report or screenshot (untrusted
 // run output served from /api/artifacts/*) as anything but its declared type.
@@ -19,12 +18,11 @@ async function forward(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ): Promise<Response> {
-  const path = (await params).path.join("/");
-  if (BLOCKED_PREFIXES.some((p) => path.startsWith(p))) {
+  // Blocked prefixes (github/, internal/) and path tricks like `..` never leave here.
+  const url = upstreamUrl((await params).path, apiBaseUrl());
+  if (!url) {
     return Response.json({ detail: "not found" }, { status: 404 });
   }
-
-  const url = new URL(`/api/${path}`, apiBaseUrl());
   url.search = request.nextUrl.search;
 
   const headers = new Headers(authHeaders());

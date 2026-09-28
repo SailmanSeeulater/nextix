@@ -20,8 +20,11 @@ on the same PR that addresses it.
 3. **What the agent gets.** The review's body plus its inline comments, read from GitHub
    when the run starts (`GET /repos/{o}/{r}/pulls/{n}/reviews/{id}/comments`), as
    `review_comments: [{"path", "line", "author", "body"}]` in `NEXTIX_TASK_JSON` (the
-   runner already renders these). Bodies are capped (4000 chars each, 50 comments, 60 KB
-   total) so the task stays inside one environment variable. The review id is stored on
+   runner already renders these). Bodies are capped (4000 chars each, the first 50 non-blank
+   inline comments) and the whole task JSON is budgeted to 100 KB (`fit_task`: a long
+   issue body is shortened first, then the last comments are dropped) so it stays inside
+   one environment variable. If the review can't be read (one retry), the run fails with
+   `github_error` rather than running without it. The review id is stored on
    the run (`runs.review_id`) so a retry of a feedback run re-reads the same review.
    The PR description the agent wrote is not re-sent; the issue task snapshot is.
 4. **Same branch, same PR.** A feedback run checks out the existing `nextix/issue-<n>`

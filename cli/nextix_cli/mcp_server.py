@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any, Literal
 
+import anyio.to_thread
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -17,7 +18,9 @@ from nextix_cli import config
 from nextix_cli.api import ApiError, NextixApi
 
 Column = Literal["todo", "doing", "needs_input", "failed", "in_review", "done"]
-_ISSUE_REF = re.compile(r"^(?:(?P<repo>[\w.-]+/[\w.-]+))?#?(?P<number>\d+)$")
+# `#` is required after a repo: with it optional, the greedy repo part would read
+# `acme/widgets12` as acme/widgets1, issue 2. A bare `12` or `#12` means the default repo.
+_ISSUE_REF = re.compile(r"^(?:(?P<repo>[\w.-]+/[\w.-]+)#|#?)(?P<number>\d+)$")
 
 INSTRUCTIONS = """nexTix turns a one-sentence change request into a GitHub issue that a Claude
 agent then works on in a sandbox, ending in a pull request. Use create_ticket to file work,
@@ -52,18 +55,24 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
     server = MCPServer(name="nextix", instructions=INSTRUCTIONS, log_level="WARNING")
 
     def connect() -> tuple[NextixApi, config.CliConfig]:
-        api, cfg = api_factory()
+        try:
+            api, cfg = api_factory()
+        except config.ConfigError as exc:
+            raise ToolError(str(exc)) from exc
         if not cfg.token:
+            api.close()
             raise ToolError("Not signed in to nexTix. Run `nextix login` in a terminal first.")
         return api, cfg
 
-    def call(fn: Callable[[], Any]) -> Any:
+    async def call(fn: Callable[[], Any]) -> Any:
+        # httpx here is blocking (triage can take minutes), so keep it off the event loop
+        # or the server can't answer anything else, cancellations included, meanwhile.
         try:
-            return fn()
+            return await anyio.to_thread.run_sync(fn)
         except ApiError as exc:
             raise ToolError(exc.message) from exc
 
-    def resolve(ticket: str, api: NextixApi, cfg: config.CliConfig) -> str:
+    async def resolve(ticket: str, api: NextixApi, cfg: config.CliConfig) -> str:
         """A ticket id from an id, `#12`, `12` (default repo), or `owner/name#12`."""
         ticket = ticket.strip()
         try:
@@ -71,20 +80,26 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
         except ValueError:
             pass
         match = _ISSUE_REF.match(ticket)
+        if not match and "/" in ticket and "#" not in ticket:
+            raise ToolError(
+                f"{ticket!r}: put # between the repo and the issue, e.g. owner/name#12."
+            )
         if not match:
-            raise ToolError(f"{ticket!r} isn't a ticket id, an issue number, or owner/name#n.")
+            raise ToolError(
+                f"{ticket!r} isn't a ticket id, an issue number (12 or #12), or owner/name#12."
+            )
         repo = match["repo"] or cfg.default_repo
         if not repo:
             raise ToolError("Say which repo (owner/name#n), or set a default with `nextix login`.")
         number = int(match["number"])
-        cards = call(lambda: api.list_tickets(repo=repo))
+        cards = await call(lambda: api.list_tickets(repo=repo))
         for card in cards:
             if card["issue_number"] == number:
                 return str(card["id"])
         raise ToolError(f"{repo}#{number} isn't on the nexTix board.")
 
     @server.tool()
-    def create_ticket(
+    async def create_ticket(
         prompt: str, repo: str | None = None, labels: list[str] | None = None, triage: bool = True
     ) -> dict[str, Any]:
         """File a change request as a nexTix ticket (a GitHub issue an agent then works on).
@@ -97,14 +112,21 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
                 request is too vague, the ticket waits in Needs Input with a question.
         """
         api, cfg = connect()
-        target = repo or cfg.default_repo
-        if not target:
-            raise ToolError("Say which repo (owner/name), or set a default with `nextix login`.")
-        created = call(
-            lambda: api.create_ticket(
-                repo=target, prompt=prompt, labels=labels or [], triage=triage, created_via="mcp"
+        with api:
+            target = repo or cfg.default_repo
+            if not target:
+                raise ToolError(
+                    "Say which repo (owner/name), or set a default with `nextix login`."
+                )
+            created = await call(
+                lambda: api.create_ticket(
+                    repo=target,
+                    prompt=prompt,
+                    labels=labels or [],
+                    triage=triage,
+                    created_via="mcp",
+                )
             )
-        )
         return {
             **_card(created["ticket"]),
             "board_url": created.get("board_url"),
@@ -113,7 +135,9 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
         }
 
     @server.tool()
-    def list_tickets(repo: str | None = None, column: Column | None = None) -> list[dict[str, Any]]:
+    async def list_tickets(
+        repo: str | None = None, column: Column | None = None
+    ) -> list[dict[str, Any]]:
         """The nexTix board: tickets with their column, latest agent run, and PR.
 
         Args:
@@ -121,10 +145,12 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
             column: todo, doing, needs_input, failed, in_review, or done.
         """
         api, _ = connect()
-        return [_card(c) for c in call(lambda: api.list_tickets(repo=repo, column=column))]
+        with api:
+            cards = await call(lambda: api.list_tickets(repo=repo, column=column))
+        return [_card(c) for c in cards]
 
     @server.tool()
-    def get_ticket_status(ticket: str) -> dict[str, Any]:
+    async def get_ticket_status(ticket: str) -> dict[str, Any]:
         """Where one ticket stands: column, latest agent run, PR, tests, and any question.
 
         Args:
@@ -132,7 +158,9 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
                 "owner/name#12".
         """
         api, cfg = connect()
-        detail = call(lambda: api.get_ticket(resolve(ticket, api, cfg)))
+        with api:
+            ticket_id = await resolve(ticket, api, cfg)
+            detail = await call(lambda: api.get_ticket(ticket_id))
         runs = detail.get("runs") or []
         latest = runs[0] if runs else None
         return {

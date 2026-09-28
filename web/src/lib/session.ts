@@ -37,8 +37,17 @@ export function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export async function isValidSession(cookie: string | undefined): Promise<boolean> {
+/** The example value from .env.example; the API refuses to run with it, and so does sign-in. */
+const EXAMPLE_TOKEN = "change-me";
+
+/** NEXTIX_API_TOKEN, or null when it is unset, empty, or still the example value (fail closed). */
+export function configuredToken(): string | null {
   const token = process.env.NEXTIX_API_TOKEN;
+  return token && token !== EXAMPLE_TOKEN ? token : null;
+}
+
+export async function isValidSession(cookie: string | undefined): Promise<boolean> {
+  const token = configuredToken();
   if (!token || !cookie) return false;
   return safeEqual(cookie, await sessionValue(token));
 }
