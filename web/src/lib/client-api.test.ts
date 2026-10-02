@@ -57,6 +57,19 @@ describe("createTicket", () => {
       triage: true,
       created_via: "web",
     });
+    // A key per attempt: resubmitting after a timeout returns the first ticket.
+    const headers = sent?.headers as Record<string, string>;
+    expect(headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("sends the caller's idempotency key when given one", async () => {
+    let sent: RequestInit | undefined;
+    const fake = (async (_url: string, init?: RequestInit) => {
+      sent = init;
+      return new Response(JSON.stringify({ needs_input: false }), { status: 201 });
+    }) as unknown as typeof fetch;
+    await createTicket({ repo: "a/b", prompt: "add x", labels: [], triage: true }, fake, "retry-1");
+    expect((sent?.headers as Record<string, string>)["idempotency-key"]).toBe("retry-1");
   });
 
   it("throws a readable ApiError on failure", async () => {

@@ -46,6 +46,8 @@ docker compose up --build
 The `api` container runs `alembic upgrade head` on start, so the schema is always current.
 
 If 3000 or 8000 are already taken on your machine, set `WEB_PORT` / `API_PORT` in `.env`.
+Both are published on `127.0.0.1` only, so nothing else on your network can reach the
+board or the API; set `BIND_HOST=0.0.0.0` to open them to your LAN.
 
 Verify:
 
@@ -176,6 +178,13 @@ card lands in **Needs Input**. `--no-triage` skips Claude and files your text as
 
 Claude may only apply labels that already exist in the repo. The model is
 `ANTHROPIC_MODEL` (default `claude-opus-5`).
+
+`POST /api/tickets` accepts an `Idempotency-Key` header (the CLI and the board send a
+fresh one per attempt). Triage can take minutes; if a client times out and retries with
+the same key, the API returns the first attempt's response instead of filing a second
+issue (`Idempotent-Replayed: true`). Reusing a key for a different body is a 422, a
+retry that arrives while the first attempt is still running is a 409, and a failed
+attempt frees its key. Keys are kept for a day.
 
 ### Paying for Claude: your plan or an API key
 

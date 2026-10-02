@@ -148,11 +148,11 @@ describe("theme plumbing", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("files every theme in a known collection: KeyUp's 15 and the portfolio's 21", () => {
+  it("files every theme in a known collection: KeyUp's 15 and the portfolio's 38", () => {
     const known = new Set(THEME_COLLECTIONS.map((c) => c.id));
     for (const theme of THEMES) expect(known.has(theme.collection), theme.id).toBe(true);
     expect(THEMES.filter((t) => t.collection === "nextix")).toHaveLength(15);
-    expect(THEMES.filter((t) => t.collection === "portfolio")).toHaveLength(21);
+    expect(THEMES.filter((t) => t.collection === "portfolio")).toHaveLength(38);
   });
 
   it("keeps each theme to the 16 base tokens, all hex except the shadow", () => {

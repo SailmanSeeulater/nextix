@@ -10,7 +10,7 @@ import binascii
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -438,16 +438,17 @@ class GitHubClient:
         branch: str,
         files: dict[str, bytes],
         message: str,
+        remove: Iterable[str] = (),
     ) -> str:
-        """Add ``files`` (path -> bytes) to ``branch`` in one commit, creating the branch as
-        an orphan if it doesn't exist. Never forced: the new commit sits on the current head.
-        Returns the new commit's sha."""
+        """Add ``files`` (path -> bytes) and drop ``remove`` paths on ``branch`` in one commit,
+        creating the branch as an orphan if it doesn't exist. Never forced: the new commit
+        sits on the current head. Returns the new commit's sha."""
         head = await self.branch_head(installation_id, owner, name, branch)
         base_tree = None
         if head is not None:
             commit = await self._get(installation_id, f"/repos/{owner}/{name}/git/commits/{head}")
             base_tree = commit["tree"]["sha"]
-        entries = []
+        entries: list[dict[str, Any]] = []
         for path, content in files.items():
             blob = await self._post(
                 installation_id,
@@ -455,6 +456,8 @@ class GitHubClient:
                 {"content": base64.b64encode(content).decode(), "encoding": "base64"},
             )
             entries.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+        # A tree entry with a null sha deletes that path from the base tree.
+        entries.extend({"path": p, "mode": "100644", "type": "blob", "sha": None} for p in remove)
         tree_body: dict[str, Any] = {"tree": entries}
         if base_tree:
             tree_body["base_tree"] = base_tree

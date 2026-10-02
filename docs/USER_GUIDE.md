@@ -314,7 +314,9 @@ What each part does:
   with the before and after images side by side, so you can review it on GitHub, even
   on your phone. The first run compares with `main`; a follow-up run (after your comment
   or review) compares with the PR as it was, so you see just what that round changed.
-  The images live on a `nextix/screenshots` branch in your repo; never merge it.
+  The images live on a `nextix/screenshots` branch in your repo; never merge it. Once a
+  ticket's PR is merged or closed, nexTix deletes that ticket's images from the branch
+  (a daily cleanup), so the branch doesn't grow forever.
 - **`app`**: how to start your app. nexTix screenshots each `path` on `main` before the
   agent starts and again after it finishes, and highlights every pixel that changed.
   `ready_timeout_s` (default 90) is how long to wait for the app to answer.
@@ -419,6 +421,9 @@ transcript, and `docker compose logs runner`.
   and only ever to `nextix/issue-N`, never forced, never to `main`. Merging is always yours.
 - **It can't reach nexTix's database or Redis**; sandboxes are on their own network,
   and compose doesn't publish those two on your machine.
+- **Only your machine can open the board.** The board and the API are published on
+  `127.0.0.1`, so other people on the same Wi-Fi can't reach the sign-in page. If you
+  want to use the board from your phone, set `BIND_HOST=0.0.0.0` in `.env`.
 - **It can reach only an allowlist of sites.** The sandboxes' network has no route out;
   their one way to the internet is the `egress` proxy, which allows GitHub, the
   Anthropic API, and the npm, PyPI, Maven, and Gradle registries (`egress/squid.conf`).

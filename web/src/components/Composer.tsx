@@ -2,7 +2,7 @@
 
 import { ArrowUpRight, LoaderCircle } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type RefObject, useId, useRef, useState } from "react";
-import { ApiError, createTicket, parseLabels } from "@/lib/client-api";
+import { ApiError, createTicket, newIdempotencyKey, parseLabels } from "@/lib/client-api";
 import type { ClaudeAuth } from "@/lib/api";
 import type { CreateTicketResult, RepoOption } from "@/lib/types";
 
@@ -40,6 +40,10 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  // The idempotency key of the draft last sent. Submitting the same draft again (after a
+  // dropped connection, say) reuses it, so the API answers with the ticket it already
+  // filed instead of a second one; an edited draft gets a fresh key.
+  const lastAttempt = useRef<{ body: string; key: string } | null>(null);
   const ids = { prompt: useId(), repo: useId(), labels: useId(), claude: useId() };
 
   const repoNames = (repos ?? []).map((r) => r.full_name);
@@ -65,13 +69,13 @@ export function Composer({
     if (!canSubmit) return;
     setBusy(true);
     setNote(null);
+    const input = { repo, prompt: prompt.trim(), labels: parseLabels(labels), triage };
+    const body = JSON.stringify(input);
+    const key = lastAttempt.current?.body === body ? lastAttempt.current.key : newIdempotencyKey();
+    lastAttempt.current = { body, key };
     try {
-      const result = await createTicket({
-        repo,
-        prompt: prompt.trim(),
-        labels: parseLabels(labels),
-        triage,
-      });
+      const result = await createTicket(input, fetch, key);
+      lastAttempt.current = null;
       onCreated(result);
       setPrompt("");
       setLabels("");

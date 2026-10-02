@@ -205,6 +205,27 @@ class WebhookDelivery(Base):
     )
 
 
+class TicketCreation(Base):
+    """One row per `Idempotency-Key` seen on POST /api/tickets.
+
+    Creating a ticket is a slow, non-idempotent call (triage can take minutes, and it
+    ends in a GitHub issue). A client that times out and retries sends the same key, and
+    gets the first attempt's response back instead of a second issue. The row is
+    reserved before the work starts and filled in after, so a concurrent duplicate sees
+    "in progress" rather than racing. Pruned after a day by housekeeping.
+    """
+
+    __tablename__ = "ticket_creations"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    ticket_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tickets.id"))
+    response: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class Artifact(Base):
     __tablename__ = "artifacts"
 
