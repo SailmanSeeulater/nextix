@@ -115,6 +115,9 @@ def test_new_creates_ticket(api: respx.MockRouter) -> None:
     assert "acme/widgets#7" in result.output
     assert CARD["issue_url"] in result.output
     assert "http://localhost:3001/" in result.output
+    # Each attempt carries its own key, so a retry after a timeout can't file twice.
+    key = route.calls[0].request.headers["Idempotency-Key"]
+    assert len(key) == 36 and key.count("-") == 4
 
 
 @pytest.mark.usefixtures("signed_in")

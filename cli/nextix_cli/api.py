@@ -1,5 +1,6 @@
 """Thin client for the nexTix HTTP API."""
 
+import uuid
 from typing import Any
 
 import httpx
@@ -37,9 +38,11 @@ class NextixApi:
         self.close()
 
     def _request(self, method: str, path: str, *, timeout: float, **kwargs: Any) -> Any:
+        # Per-call headers (e.g. Idempotency-Key) go on top of the auth header.
+        headers = {**self._headers, **kwargs.pop("headers", {})}
         try:
             resp = self._http.request(
-                method, f"{self._base}{path}", headers=self._headers, timeout=timeout, **kwargs
+                method, f"{self._base}{path}", headers=headers, timeout=timeout, **kwargs
             )
         except httpx.TimeoutException as exc:
             raise ApiError(f"The nexTix API at {self._base} took too long to respond.") from exc
@@ -74,8 +77,12 @@ class NextixApi:
             "triage": triage,
             "created_via": created_via,
         }
+        # One key per attempt: if this call times out while the API is still working and
+        # the user runs the command again, the API returns the first ticket rather than
+        # filing a second GitHub issue.
+        headers = {"Idempotency-Key": str(uuid.uuid4())}
         result: dict[str, Any] = self._request(
-            "POST", "/api/tickets", json=body, timeout=CREATE_TIMEOUT_S
+            "POST", "/api/tickets", json=body, headers=headers, timeout=CREATE_TIMEOUT_S
         )
         return result
 

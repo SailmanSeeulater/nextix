@@ -39,7 +39,8 @@ celery_app.conf.update(
     task_routes={"nextix.execute_run": {"queue": "runs"}},
     beat_schedule={
         "reap-runs": {"task": "nextix.reap_runs", "schedule": 30.0},
-        # Old webhook dedupe rows (see nextix/housekeeping.py).
+        # Daily cleanup: old webhook dedupe rows, idempotency records, and the screenshots
+        # of finished tickets (see nextix/housekeeping.py).
         "prune-webhook-deliveries": {
             "task": "nextix.prune_webhook_deliveries",
             "schedule": 24 * 60 * 60.0,

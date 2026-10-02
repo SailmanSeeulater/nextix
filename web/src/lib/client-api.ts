@@ -64,15 +64,24 @@ export function parseLabels(raw: string): string[] {
   ];
 }
 
+/** A fresh key per submit attempt; the API dedupes repeats of the same key. */
+export function newIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export async function createTicket(
   input: CreateTicketInput,
   fetchImpl: typeof fetch = fetch,
+  idempotencyKey: string = newIdempotencyKey(),
 ): Promise<CreateTicketResult> {
   let res: Response;
   try {
     res = await fetchImpl("/api/tickets", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      // The key makes a retry of a timed-out submit return the first ticket instead of
+      // filing a second issue (the API dedupes on it for a day).
+      headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
       body: JSON.stringify({ ...input, created_via: "web" }),
     });
   } catch {
