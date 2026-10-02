@@ -1,11 +1,12 @@
 /**
  * Color themes in two collections:
  * - "nextix": the 15 themes shared with KeyUp (same ids, same values; keep them in step).
- * - "portfolio": the 21 themes of the owner's portfolio site, mapped onto the same tokens.
+ * - "portfolio": the 38 themes of the owner's portfolio site, mapped onto the same tokens.
  *   Ground, surface, text and brand keep the portfolio's values (bg, raised, ink, accent);
- *   the rest is derived from them and bent only where the gate demands it. Four portfolio
+ *   the rest is derived from them and bent only where the gate demands it. Seven portfolio
  *   ids collide with KeyUp's, so they are renamed: forest -> meadow, midnight -> lime,
- *   espresso -> latte, slate -> ice. Names are the portfolio's own.
+ *   espresso -> latte, slate -> ice, linen -> indigo, ink -> periwinkle, plum -> lemon.
+ *   Names are the portfolio's own.
  *
  * A theme sets exactly the 16 base tokens below. Everything else in globals.css,
  * including the six pass colors, derives from them, so a new theme needs no CSS.
@@ -146,12 +147,13 @@ const NEXTIX_THEMES: Theme[] = [
 ];
 
 /**
- * The portfolio's 21 (Portfolio_Website/src/App.jsx), in its order. Derived surfaces follow
+ * The portfolio's 38 (Portfolio_Website/src/App.jsx), in its order. Derived surfaces follow
  * the KeyUp themes: dark sidebar/field are the ground darkened 14%/8%, pane is 30% raised
  * over the ground, line is 3.5% ink over raised; light sidebar/pane/line are 3.5%/2%/9% ink
  * over the ground, field is 60% white over raised. ink-2/3/4 are ink mixed toward the ground.
- * One portfolio value is bent: Green & White's surface gains a little green chroma
- * (#eef6f0 -> #e8f9ec) so the selected segment parts from the rail.
+ * Two portfolio values are bent: Green & White's surface gains a little green chroma
+ * (#eef6f0 -> #e8f9ec) so the selected segment parts from the rail, and Cobalt & Cyan's
+ * brand drops 0.005 OKLCH lightness (#6fe3ff -> #6de1fd) for the Doing label.
  */
 const PORTFOLIO_THEMES: Theme[] = [
   {
@@ -279,6 +281,111 @@ const PORTFOLIO_THEMES: Theme[] = [
     tokens: { bg: "#1f2124", sidebar: "#1b1c1f", pane: "#222528", raised: "#2a2d31", field: "#1d1e21", line: "#313437",
       ink: "#f1efe8", ink2: "#c7c6c1", ink3: "#a5a5a1", ink4: "#9d9d9a", accent: "#f2c230", onAccent: "#1f2124",
       red: "#f6857a", rose: "#cca1e0", green: "#92cc93", shadow: darkShadow },
+  },
+  // The 17 added to the portfolio after the first 21, in its order. Same derivation; renamed:
+  // linen -> indigo, ink -> periwinkle, plum -> lemon. Cobalt & Cyan's brand is bent a hair
+  // (#6fe3ff -> #6de1fd) so the Doing pass label clears 4.5:1.
+  {
+    id: "peach", name: "Peach & Plum", mode: "light", collection: "portfolio",
+    tokens: { bg: "#ffe8d6", sidebar: "#f8e0d2", pane: "#fbe3d4", raised: "#fff4ec", field: "#fffbf7", line: "#edd4cc",
+      ink: "#3b0764", ink2: "#62347b", ink3: "#82588d", ink4: "#896192", accent: "#6b21a8", onAccent: "#ffffff",
+      red: "#ac312c", rose: "#8e4088", green: "#267543", shadow: "rgba(59, 7, 100, 0.2)" },
+  },
+  {
+    id: "dune", name: "Dune & Sea", mode: "light", collection: "portfolio",
+    tokens: { bg: "#f1e7d3", sidebar: "#e9e1ce", pane: "#ece4d0", raised: "#fbf5ea", field: "#fdfbf7", line: "#dcd8c6",
+      ink: "#0b3b42", ink2: "#395d5f", ink3: "#4b6b6b", ink4: "#557270", accent: "#0f6f7a", onAccent: "#ffffff",
+      red: "#a83630", rose: "#854494", green: "#367341", shadow: "rgba(11, 59, 66, 0.2)" },
+  },
+  {
+    id: "sage", name: "Blush & Sage", mode: "light", collection: "portfolio",
+    tokens: { bg: "#f6ebe7", sidebar: "#eee5e0", pane: "#f2e7e3", raised: "#fdf6f4", field: "#fefbfb", line: "#e3dbd6",
+      ink: "#1f3a27", ink2: "#4a5d4d", ink3: "#5d6d5f", ink4: "#667466", accent: "#3f6b4a", onAccent: "#ffffff",
+      red: "#a83630", rose: "#854494", green: "#107460", shadow: "rgba(31, 58, 39, 0.2)" },
+  },
+  {
+    id: "citrus", name: "Citrus & Cobalt", mode: "light", collection: "portfolio",
+    tokens: { bg: "#eef7cf", sidebar: "#e6f0cb", pane: "#eaf3cd", raised: "#f7fbe6", field: "#fcfdf5", line: "#dbe4c5",
+      ink: "#16265e", ink2: "#415075", ink3: "#5f6d84", ink4: "#687589", accent: "#1e40af", onAccent: "#ffffff",
+      red: "#ac312c", rose: "#854494", green: "#1f744f", shadow: "rgba(22, 38, 94, 0.2)" },
+  },
+  {
+    id: "quartz", name: "Rose Quartz & Wine", mode: "light", collection: "portfolio",
+    tokens: { bg: "#fbe4ec", sidebar: "#f5dce5", pane: "#f8e0e8", raised: "#fdf1f5", field: "#fef9fb", line: "#ebd0d9",
+      ink: "#4c0519", ink2: "#6f3243", ink3: "#8b5565", ink4: "#925e6d", accent: "#9d174d", onAccent: "#ffffff",
+      red: "#a8372a", rose: "#6b4cae", green: "#267543", shadow: "rgba(76, 5, 25, 0.2)" },
+  },
+  {
+    id: "butter", name: "Butter & Berry", mode: "light", collection: "portfolio",
+    tokens: { bg: "#fff5d1", sidebar: "#f9edcd", pane: "#fbf0ce", raised: "#fffbe9", field: "#fffdf6", line: "#efe0c6",
+      ink: "#4a0d52", ink2: "#6e3b6b", ink3: "#895e7e", ink4: "#916784", accent: "#a21caf", onAccent: "#ffffff",
+      red: "#ac312c", rose: "#6b4cae", green: "#267543", shadow: "rgba(74, 13, 82, 0.2)" },
+  },
+  {
+    id: "indigo", name: "Linen & Indigo", mode: "light", collection: "portfolio",
+    tokens: { bg: "#f5f1e8", sidebar: "#edeae3", pane: "#f1ede5", raised: "#fcfaf4", field: "#fefdfb", line: "#e2deda",
+      ink: "#1e1b4b", ink2: "#49466a", ink3: "#6b6884", ink4: "#74718a", accent: "#3730a3", onAccent: "#ffffff",
+      red: "#ac312c", rose: "#8a428e", green: "#2b7440", shadow: "rgba(30, 27, 75, 0.2)" },
+  },
+  {
+    id: "seafoam", name: "Seafoam & Rust", mode: "light", collection: "portfolio",
+    tokens: { bg: "#dff0ec", sidebar: "#dae9e4", pane: "#dcece7", raised: "#f1f9f7", field: "#f9fdfc", line: "#d2ddd7",
+      ink: "#4a1c08", ink2: "#684636", ink3: "#7b6253", ink4: "#816a5c", accent: "#9a3412", onAccent: "#ffffff",
+      red: "#af2843", rose: "#854494", green: "#2b7440", shadow: "rgba(74, 28, 8, 0.2)" },
+  },
+  {
+    id: "abyss", name: "Abyss & Aqua", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#04252c", sidebar: "#032026", pane: "#062a32", raised: "#0b3540", field: "#042228", line: "#133c46",
+      ink: "#e6fbf8", ink2: "#b9d0cf", ink3: "#95aeaf", ink4: "#8ca5a6", accent: "#4fe0d2", onAccent: "#04252c",
+      red: "#fb817a", rose: "#d19ce9", green: "#90ce83", shadow: darkShadow },
+  },
+  {
+    id: "periwinkle", name: "Ink & Periwinkle", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#12142b", sidebar: "#0f1125", pane: "#151831", raised: "#1d2040", field: "#111228", line: "#242747",
+      ink: "#ecefff", ink2: "#c0c3d5", ink3: "#9ea0b3", ink4: "#9597aa", accent: "#aab6ff", onAccent: "#12142b",
+      red: "#fb8276", rose: "#d69be4", green: "#77d199", shadow: darkShadow },
+  },
+  {
+    id: "moss", name: "Moss & Honey", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#12251a", sidebar: "#0f2016", pane: "#15291d", raised: "#1b3325", field: "#112218", line: "#223a2c",
+      ink: "#ecf3e8", ink2: "#c0cabf", ink3: "#9ea99e", ink4: "#95a196", accent: "#f0c86a", onAccent: "#12251a",
+      red: "#fb8276", rose: "#d49be6", green: "#70d1a9", shadow: darkShadow },
+  },
+  {
+    id: "merlot", name: "Merlot & Rose", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#2a0e18", sidebar: "#240c15", pane: "#2f111c", raised: "#3a1724", field: "#270d16", line: "#411e2b",
+      ink: "#fdeaf0", ink2: "#d3bec5", ink3: "#b19ba2", ink4: "#a9929a", accent: "#ffa6c1", onAccent: "#2a0e18",
+      red: "#fb8371", rose: "#c0a2f5", green: "#7cd194", shadow: darkShadow },
+  },
+  {
+    id: "steel", name: "Steel & Ice", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#1b222b", sidebar: "#171d25", pane: "#1e2630", raised: "#26303c", field: "#191f28", line: "#2d3743",
+      ink: "#eaf2fa", ink2: "#c1c8d1", ink3: "#9fa7af", ink4: "#979fa7", accent: "#8fd3ff", onAccent: "#1b222b",
+      red: "#fb8276", rose: "#d49be6", green: "#7cd194", shadow: darkShadow },
+  },
+  {
+    id: "olive", name: "Olive & Apricot", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#232712", sidebar: "#1e220f", pane: "#272c15", raised: "#31371c", field: "#202411", line: "#383e23",
+      ink: "#f3f1e1", ink2: "#c9c9b8", ink3: "#a8a896", ink4: "#a0a08e", accent: "#ffb877", onAccent: "#232712",
+      red: "#fe7d85", rose: "#d49be6", green: "#77d0a2", shadow: darkShadow },
+  },
+  {
+    id: "lemon", name: "Plum & Lemon", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#2d0f2a", sidebar: "#270d24", pane: "#32122e", raised: "#3c1938", field: "#290e27", line: "#43203f",
+      ink: "#f8eaf6", ink2: "#cfbecd", ink3: "#af9bad", ink4: "#a792a4", accent: "#f6e06b", onAccent: "#2d0f2a",
+      red: "#fb8276", rose: "#cc9eed", green: "#7cd194", shadow: darkShadow },
+  },
+  {
+    id: "cobalt", name: "Cobalt & Cyan", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#101f4a", sidebar: "#0e1b40", pane: "#132351", raised: "#1a2c60", field: "#0f1d44", line: "#213366",
+      ink: "#e9eeff", ink2: "#bec5db", ink3: "#9ba3be", ink4: "#929bb7", accent: "#6de1fd", onAccent: "#101f4a",
+      red: "#fb8276", rose: "#d69be4", green: "#7cd194", shadow: darkShadow },
+  },
+  {
+    id: "onyx", name: "Onyx & Violet", mode: "dark", collection: "portfolio",
+    tokens: { bg: "#121016", sidebar: "#0f0e13", pane: "#15131a", raised: "#1d1a23", field: "#110f14", line: "#24212a",
+      ink: "#efecf5", ink2: "#c3c0c8", ink3: "#9f9da5", ink4: "#97949c", accent: "#bb92ff", onAccent: "#121016",
+      red: "#fb8276", rose: "#d69be4", green: "#7cd194", shadow: darkShadow },
   },
 ];
 

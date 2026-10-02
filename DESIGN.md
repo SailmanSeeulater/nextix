@@ -153,7 +153,7 @@ components:
 
 Every ticket is an Apple Wallet pass and every state is a stack of passes. The board refuses the category default of flat grey kanban cards in bordered lanes: six stacks stand side by side, collapsed passes overlap so only their header strips show, and the newest pass in each stack lies open with PassKit anatomy (a header strip carrying repo and issue number, one large primary field, small-caps label-over-value fields, and a boarding-pass tear line). Filing work is one sentence typed into a blank pass at the top.
 
-Color is flat and fully committed, and it belongs to the theme rather than the component. There are 36 themes in two collections: **nexTix**, KeyUp's 15 (11 dark, 4 light) with the same values, and **Portfolio**, the 21 themes of the owner's portfolio site (8 dark, 13 light), whose ground, surface, text and brand map straight onto bg, raised, ink and accent. Each theme sets 16 base tokens from which every nexTix color derives, including the six pass fills. The owner picks a theme in the top bar; until then the OS preference chooses Charcoal & Mustard or Linen & Mustard. The values in this file's frontmatter are Charcoal & Mustard, the default and `:root` fallback; the normative source is the theme table in `web/src/lib/themes.ts` plus the derivation formulas in `web/src/app/globals.css`.
+Color is flat and fully committed, and it belongs to the theme rather than the component. There are 53 themes in two collections: **nexTix**, KeyUp's 15 (11 dark, 4 light) with the same values, and **Portfolio**, the 38 themes of the owner's portfolio site (17 dark, 21 light), whose ground, surface, text and brand map straight onto bg, raised, ink and accent. Each theme sets 16 base tokens from which every nexTix color derives, including the six pass fills. The owner picks a theme in the top bar; until then the OS preference chooses Charcoal & Mustard or Linen & Mustard. The values in this file's frontmatter are Charcoal & Mustard, the default and `:root` fallback; the normative source is the theme table in `web/src/lib/themes.ts` plus the derivation formulas in `web/src/app/globals.css`.
 
 The board is read at a glance between other tasks, so density is high but calm: one type family, weights doing the hierarchy, exact tabular numerals for time and money, and state always carried three ways (fill, glyph, word).
 
@@ -297,7 +297,7 @@ An 8px dot in currentColor with a ring that expands from 0.5 to 1.4 scale and fa
 ### Do:
 - **Do** derive every new color from the 16 theme tokens with `color-mix` in globals.css, and add the check to themes.test.ts.
 - **Do** give every state a fill, a glyph and a word.
-- **Do** keep Doing and Needs Input far from Failed red (ΔE 0.2 or more) in all 36 themes.
+- **Do** keep Doing and Needs Input far from Failed red (ΔE 0.2 or more) in all 53 themes.
 - **Do** set times, costs and counts in tabular numerals.
 - **Do** use the notched tear line between a pass's header and its body.
 - **Do** render disabled primaries neutral: field fill, ink-3 text, hairline ring.
