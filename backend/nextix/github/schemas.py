@@ -61,6 +61,7 @@ class GhComment(_Gh):
     body: str | None = None
     user: GhUser | None = None
     created_at: datetime
+    html_url: str | None = None
 
 
 class GhRef(_Gh):

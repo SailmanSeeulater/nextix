@@ -43,8 +43,11 @@ Add `--json` to `new` or `ls` for machine-readable output.
 
 ## Use it from Claude Code or Claude Desktop (MCP)
 
-`nextix mcp` runs an MCP server over stdio with three tools: `create_ticket`,
-`list_tickets`, and `get_ticket_status` (by ticket id, `12`, `#12`, or `owner/name#12`).
+`nextix mcp` runs an MCP server over stdio with five tools: `create_ticket`,
+`list_tickets`, `get_ticket_status`, `get_ticket` (the issue's body and comments), and
+`comment_on_ticket` (posts as the nexTix app, which never starts an agent run). Tickets are
+named by id, `12`, `#12`, or `owner/name#12`. The three reading tools are marked read-only,
+so clients that check (Claude Code, Zwans) can run them without asking.
 It uses the same login as the CLI, so run `nextix login` once first. Register it with
 Claude Code:
 
