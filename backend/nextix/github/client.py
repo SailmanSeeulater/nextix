@@ -282,10 +282,13 @@ class GitHubClient:
 
     async def create_comment(
         self, installation_id: int, owner: str, name: str, number: int, body: str
-    ) -> None:
-        await self._post(
+    ) -> str | None:
+        """Returns the new comment's URL."""
+        data = await self._post(
             installation_id, f"/repos/{owner}/{name}/issues/{number}/comments", {"body": body}
         )
+        url = data.get("html_url") if isinstance(data, dict) else None
+        return url if isinstance(url, str) else None
 
     async def list_issue_comments(
         self, installation_id: int, owner: str, name: str, number: int, *, since: datetime | None

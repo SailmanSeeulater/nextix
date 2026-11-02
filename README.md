@@ -303,8 +303,10 @@ Details: [docs/phase5.md](docs/phase5.md).
   Claude plan keep one at a time: parallel runs share one allowance.
 - **Costs:** `GET /api/costs?days=30` and the board's Costs page break down cost and
   tokens by day, repo, and ticket (Claude Code's estimates when you're on a plan).
-- **MCP:** `nextix mcp` exposes `create_ticket`, `list_tickets`, and `get_ticket_status`
-  to Claude Code (`claude mcp add nextix -- nextix mcp`) or Claude Desktop.
+- **MCP:** `nextix mcp` exposes `create_ticket`, `list_tickets`, `get_ticket_status`,
+  `get_ticket` and `comment_on_ticket` to Claude Code (`claude mcp add nextix -- nextix mcp`),
+  Claude Desktop, or any MCP client. The API behind the last two is
+  `GET /api/tickets/{id}/conversation` and `POST /api/tickets/{id}/comments`.
 - **Model routing:** `NEXTIX_MODEL_ROUTES=nextix:small=claude-haiku-4-5,...` picks the
   agent's model from the ticket's labels; the model used is shown per run.
 - **Temporal:** a design note for moving off Celery, [docs/temporal.md](docs/temporal.md).

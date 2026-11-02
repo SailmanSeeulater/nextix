@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import uuid
 from typing import Annotated
 
 import httpx
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nextix.api.auth import require_user
 from nextix.api.deps import get_enqueuer, get_github, get_publisher, get_triager
 from nextix.config import Settings, get_settings
-from nextix.db.models import Ticket, TicketCreation
+from nextix.db.models import Repo, Ticket, TicketCreation
 from nextix.db.session import get_db
 from nextix.events.stream import EventPublisher, publish_ticket_changes
 from nextix.github.client import GitHubClient
@@ -21,9 +22,13 @@ from nextix.runs.lifecycle import ActiveRunExists, RunEnqueuer, enqueue_run
 from nextix.tickets.creation import TicketCreationError, create_ticket
 from nextix.tickets.schemas import (
     Column,
+    CommentPosted,
+    CommentRequest,
     CreateTicketRequest,
     CreateTicketResponse,
     TicketCard,
+    TicketComment,
+    TicketConversation,
 )
 from nextix.tickets.service import get_card, list_board
 from nextix.tickets.triage import TriageError, Triager
@@ -174,3 +179,75 @@ async def post_ticket(
         )
         await session.commit()
     return result
+
+
+async def _ticket_and_repo(session: AsyncSession, ticket_id: uuid.UUID) -> tuple[Ticket, Repo]:
+    ticket = await session.get(Ticket, ticket_id)
+    repo = await session.get(Repo, ticket.repo_id) if ticket is not None else None
+    if ticket is None or repo is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such ticket")
+    return ticket, repo
+
+
+def _github_failed(exc: httpx.HTTPStatusError, doing: str) -> HTTPException:
+    log.warning("GitHub error %s: %s", doing, exc)
+    return HTTPException(
+        status.HTTP_502_BAD_GATEWAY,
+        f"GitHub returned {exc.response.status_code} while {doing}.",
+    )
+
+
+@router.get("/tickets/{ticket_id}/conversation", response_model=TicketConversation)
+async def get_conversation(
+    ticket_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    gh: Annotated[GitHubClient, Depends(get_github)],
+) -> TicketConversation:
+    """The issue's body and comments, read from GitHub, which has the only copy."""
+    ticket, repo = await _ticket_and_repo(session, ticket_id)
+    try:
+        issue = await gh.get_issue(repo.installation_id, repo.owner, repo.name, ticket.issue_number)
+        comments = await gh.list_issue_comments(
+            repo.installation_id, repo.owner, repo.name, ticket.issue_number, since=None
+        )
+    except httpx.HTTPStatusError as exc:
+        raise _github_failed(exc, "reading the issue") from exc
+    found = await get_card(session, ticket_id)
+    if issue is None or found is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "the issue is gone from GitHub")
+    return TicketConversation(
+        ticket=found[0],
+        body=issue.body or "",
+        comments=[
+            TicketComment(
+                author=comment.user.login if comment.user else None,
+                body=comment.body or "",
+                created_at=comment.created_at,
+                url=comment.html_url,
+            )
+            for comment in comments
+        ],
+    )
+
+
+@router.post(
+    "/tickets/{ticket_id}/comments",
+    response_model=CommentPosted,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_comment(
+    ticket_id: uuid.UUID,
+    body: CommentRequest,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    gh: Annotated[GitHubClient, Depends(get_github)],
+) -> CommentPosted:
+    """Comment on the ticket's issue as the nexTix app. The app's own comments never start
+    an agent run, so this is safe for agents to call."""
+    ticket, repo = await _ticket_and_repo(session, ticket_id)
+    try:
+        url = await gh.create_comment(
+            repo.installation_id, repo.owner, repo.name, ticket.issue_number, body.body
+        )
+    except httpx.HTTPStatusError as exc:
+        raise _github_failed(exc, "posting the comment") from exc
+    return CommentPosted(url=url)

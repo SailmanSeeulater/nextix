@@ -46,6 +46,37 @@ class TicketCard(BaseModel):
     tests_failing: bool = False
 
 
+class TicketComment(BaseModel):
+    author: str | None
+    body: str
+    created_at: datetime
+    url: str | None
+
+
+class TicketConversation(BaseModel):
+    """A ticket's issue as people and agents wrote it: the body and every comment."""
+
+    ticket: TicketCard
+    body: str
+    comments: list[TicketComment]
+
+
+class CommentPosted(BaseModel):
+    url: str | None
+
+
+class CommentRequest(BaseModel):
+    # GitHub's limit for a comment body is 65,536 characters.
+    body: str = Field(min_length=1, max_length=65_536)
+
+    @field_validator("body")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("the comment is empty")
+        return value
+
+
 class CreateTicketRequest(BaseModel):
     repo: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", description="owner/name")
     prompt: str = Field(min_length=3, max_length=20_000)

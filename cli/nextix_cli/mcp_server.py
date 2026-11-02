@@ -13,6 +13,7 @@ from typing import Any, Literal
 import anyio.to_thread
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from nextix_cli import config
 from nextix_cli.api import ApiError, NextixApi
@@ -24,8 +25,14 @@ _ISSUE_REF = re.compile(r"^(?:(?P<repo>[\w.-]+/[\w.-]+)#|#?)(?P<number>\d+)$")
 
 INSTRUCTIONS = """nexTix turns a one-sentence change request into a GitHub issue that a Claude
 agent then works on in a sandbox, ending in a pull request. Use create_ticket to file work,
-list_tickets to see the board, and get_ticket_status to follow one ticket (its column, the
-latest agent run, the pull request, tests, and any question the agent asked)."""
+list_tickets to see the board, get_ticket_status to follow one ticket (its column, the latest
+agent run, the pull request, tests, and any question the agent asked), get_ticket to read its
+issue and comments, and comment_on_ticket to reply on the issue."""
+
+READ_ONLY = ToolAnnotations(read_only_hint=True)
+# A comment adds to the issue and never starts an agent run (the app's own comments don't).
+COMMENT = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=True)
+MAX_COMMENT_CHARS = 65_536  # GitHub's limit
 
 
 def _card(card: dict[str, Any]) -> dict[str, Any]:
@@ -134,7 +141,7 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
             "clarifying_question": created.get("clarifying_question"),
         }
 
-    @server.tool()
+    @server.tool(annotations=READ_ONLY)
     async def list_tickets(
         repo: str | None = None, column: Column | None = None
     ) -> list[dict[str, Any]]:
@@ -149,7 +156,7 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
             cards = await call(lambda: api.list_tickets(repo=repo, column=column))
         return [_card(c) for c in cards]
 
-    @server.tool()
+    @server.tool(annotations=READ_ONLY)
     async def get_ticket_status(ticket: str) -> dict[str, Any]:
         """Where one ticket stands: column, latest agent run, PR, tests, and any question.
 
@@ -182,6 +189,47 @@ def build_server(api_factory: Callable[[], tuple[NextixApi, config.CliConfig]]) 
             ),
             "runs": len(runs),
         }
+
+    @server.tool(annotations=READ_ONLY)
+    async def get_ticket(ticket: str) -> dict[str, Any]:
+        """Read a ticket's GitHub issue: its body and every comment, oldest first.
+
+        Args:
+            ticket: A ticket id, an issue number ("12" or "#12", in the default repo), or
+                "owner/name#12".
+        """
+        api, cfg = connect()
+        with api:
+            ticket_id = await resolve(ticket, api, cfg)
+            conversation = await call(lambda: api.get_conversation(ticket_id))
+        return {
+            **_card(conversation["ticket"]),
+            "body": conversation["body"],
+            "comments": [
+                {"author": c.get("author"), "body": c["body"], "created_at": c["created_at"]}
+                for c in conversation["comments"]
+            ],
+        }
+
+    @server.tool(annotations=COMMENT)
+    async def comment_on_ticket(ticket: str, body: str) -> dict[str, Any]:
+        """Post a comment on a ticket's GitHub issue, as the nexTix app. It's visible to
+        everyone who can see the repository. It doesn't start an agent run.
+
+        Args:
+            ticket: A ticket id, an issue number ("12" or "#12", in the default repo), or
+                "owner/name#12".
+            body: The comment, in GitHub Markdown.
+        """
+        if not body.strip():
+            raise ToolError("The comment is empty.")
+        if len(body) > MAX_COMMENT_CHARS:
+            raise ToolError(f"The comment is longer than GitHub's {MAX_COMMENT_CHARS} characters.")
+        api, cfg = connect()
+        with api:
+            ticket_id = await resolve(ticket, api, cfg)
+            posted = await call(lambda: api.add_comment(ticket_id, body))
+        return {"posted": True, "url": posted.get("url")}
 
     return server
 

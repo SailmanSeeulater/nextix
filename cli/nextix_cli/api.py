@@ -101,6 +101,21 @@ class NextixApi:
         )
         return result
 
+    def get_conversation(self, ticket_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = self._request(
+            "GET", f"/api/tickets/{ticket_id}/conversation", timeout=DEFAULT_TIMEOUT_S
+        )
+        return result
+
+    def add_comment(self, ticket_id: str, body: str) -> dict[str, Any]:
+        result: dict[str, Any] = self._request(
+            "POST",
+            f"/api/tickets/{ticket_id}/comments",
+            json={"body": body},
+            timeout=DEFAULT_TIMEOUT_S,
+        )
+        return result
+
 
 def _detail(resp: httpx.Response) -> str:
     try:

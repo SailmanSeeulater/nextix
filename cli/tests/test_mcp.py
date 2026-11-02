@@ -53,10 +53,20 @@ def payload(result: Any) -> Any:
 
 
 @pytest.mark.anyio
-async def test_the_three_tools_are_offered() -> None:
+async def test_the_tools_are_offered_and_the_reads_say_so() -> None:
     async with Client(server()) as client:
-        tools = {t.name for t in (await client.list_tools()).tools}
-    assert tools == {"create_ticket", "list_tickets", "get_ticket_status"}
+        tools = {t.name: t for t in (await client.list_tools()).tools}
+    assert set(tools) == {
+        "create_ticket",
+        "list_tickets",
+        "get_ticket_status",
+        "get_ticket",
+        "comment_on_ticket",
+    }
+    read_only = {
+        name for name, tool in tools.items() if tool.annotations and tool.annotations.read_only_hint
+    }
+    assert read_only == {"list_tickets", "get_ticket_status", "get_ticket"}
 
 
 @pytest.mark.anyio
@@ -166,3 +176,53 @@ async def test_errors_are_readable_tool_errors() -> None:
         api.get("/api/tickets").respond(401)
         refused = await call("list_tickets", {})
     assert refused.is_error and "rejected your token" in refused.content[0].text
+
+
+CONVERSATION = {
+    "ticket": CARD,
+    "body": "## Context\nUsers asked for it.",
+    "comments": [
+        {
+            "author": "alice",
+            "body": "The account page, please.",
+            "created_at": "2026-10-30T09:05:00Z",
+            "url": "https://github.com/acme/widgets/issues/7#issuecomment-2",
+        }
+    ],
+}
+
+
+@pytest.mark.anyio
+async def test_get_ticket_reads_the_issue_and_its_comments() -> None:
+    with respx.mock(base_url=BASE) as api:
+        api.get("/api/tickets").respond(200, json=[CARD])
+        api.get(f"/api/tickets/{TICKET_ID}/conversation").respond(200, json=CONVERSATION)
+        result = payload(await call("get_ticket", {"ticket": "#7"}))
+    assert result["ticket"] == "acme/widgets#7"
+    assert result["body"] == "## Context\nUsers asked for it."
+    assert result["comments"] == [
+        {
+            "author": "alice",
+            "body": "The account page, please.",
+            "created_at": "2026-10-30T09:05:00Z",
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_comment_on_ticket_posts_it() -> None:
+    url = "https://github.com/acme/widgets/issues/7#issuecomment-3"
+    with respx.mock(base_url=BASE) as api:
+        posted = api.post(f"/api/tickets/{TICKET_ID}/comments").respond(201, json={"url": url})
+        result = payload(await call("comment_on_ticket", {"ticket": TICKET_ID, "body": "Done."}))
+    assert result == {"posted": True, "url": url}
+    assert json.loads(posted.calls.last.request.content) == {"body": "Done."}
+
+
+@pytest.mark.anyio
+async def test_an_empty_comment_is_refused_before_calling_the_api() -> None:
+    with respx.mock(base_url=BASE, assert_all_called=False) as api:
+        posted = api.post(f"/api/tickets/{TICKET_ID}/comments").respond(201, json={})
+        result = await call("comment_on_ticket", {"ticket": TICKET_ID, "body": "  "})
+    assert result.is_error and "empty" in result.content[0].text
+    assert not posted.called
