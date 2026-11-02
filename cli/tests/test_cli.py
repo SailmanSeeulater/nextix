@@ -259,8 +259,10 @@ def test_malformed_config_is_a_friendly_error() -> None:
     config.config_path().write_text('token = "unterminated\n', encoding="utf-8")
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 1
-    assert "config.toml" in result.output and "isn't valid TOML" in result.output
-    assert "Traceback" not in result.output
+    # The message wraps at the terminal width, and where depends on the temp path's length.
+    output = " ".join(result.output.split())
+    assert "config.toml" in output and "isn't valid TOML" in output
+    assert "Traceback" not in output
 
 
 def test_mcp_command_is_registered_when_run_as_a_script() -> None:
